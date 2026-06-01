@@ -3,6 +3,7 @@ list(APPEND bmx_headers
     bmx/mxf_helper/ANCDataMXFDescriptorHelper.h
     bmx/mxf_helper/AVCIMXFDescriptorHelper.h
     bmx/mxf_helper/AVCMXFDescriptorHelper.h
+    bmx/mxf_helper/HEVCMXFDescriptorHelper.h
     bmx/mxf_helper/D10MXFDescriptorHelper.h
     bmx/mxf_helper/DVMXFDescriptorHelper.h
     bmx/mxf_helper/DataMXFDescriptorHelper.h

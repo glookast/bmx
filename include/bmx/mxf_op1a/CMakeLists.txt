@@ -2,6 +2,7 @@ list(APPEND bmx_headers
     bmx/mxf_op1a/OP1AANCDataTrack.h
     bmx/mxf_op1a/OP1AAVCITrack.h
     bmx/mxf_op1a/OP1AAVCTrack.h
+    bmx/mxf_op1a/OP1AHEVCTrack.h
     bmx/mxf_op1a/OP1AContentPackage.h
     bmx/mxf_op1a/OP1AD10Track.h
     bmx/mxf_op1a/OP1ADVTrack.h

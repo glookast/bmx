@@ -6,6 +6,7 @@ list(APPEND MXFpp_sources
     metadata/base/AES3AudioDescriptorBase.cpp
     metadata/base/ANCDataDescriptorBase.cpp
     metadata/base/AVCSubDescriptorBase.cpp
+    metadata/base/HEVCSubDescriptorBase.cpp
     metadata/base/AudioChannelLabelSubDescriptorBase.cpp
     metadata/base/CDCIEssenceDescriptorBase.cpp
     metadata/base/ContainerConstraintsSubDescriptorBase.cpp
@@ -72,6 +73,7 @@ list(APPEND MXFpp_headers
     metadata/base/AES3AudioDescriptorBase.h
     metadata/base/ANCDataDescriptorBase.h
     metadata/base/AVCSubDescriptorBase.h
+    metadata/base/HEVCSubDescriptorBase.h
     metadata/base/AudioChannelLabelSubDescriptorBase.h
     metadata/base/CDCIEssenceDescriptorBase.h
     metadata/base/ContainerConstraintsSubDescriptorBase.h

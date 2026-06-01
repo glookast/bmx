@@ -3,6 +3,7 @@ list(APPEND bmx_sources
     mxf_helper/ANCDataMXFDescriptorHelper.cpp
     mxf_helper/AVCIMXFDescriptorHelper.cpp
     mxf_helper/AVCMXFDescriptorHelper.cpp
+    mxf_helper/HEVCMXFDescriptorHelper.cpp
     mxf_helper/D10MXFDescriptorHelper.cpp
     mxf_helper/DVMXFDescriptorHelper.cpp
     mxf_helper/DataMXFDescriptorHelper.cpp

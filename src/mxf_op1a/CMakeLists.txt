@@ -2,6 +2,7 @@ list(APPEND bmx_sources
     mxf_op1a/OP1AANCDataTrack.cpp
     mxf_op1a/OP1AAVCITrack.cpp
     mxf_op1a/OP1AAVCTrack.cpp
+    mxf_op1a/OP1AHEVCTrack.cpp
     mxf_op1a/OP1AContentPackage.cpp
     mxf_op1a/OP1AD10Track.cpp
     mxf_op1a/OP1ADVTrack.cpp

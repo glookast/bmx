@@ -44,6 +44,7 @@
 #include <bmx/mxf_op1a/OP1AD10Track.h>
 #include <bmx/mxf_op1a/OP1AAVCITrack.h>
 #include <bmx/mxf_op1a/OP1AAVCTrack.h>
+#include <bmx/mxf_op1a/OP1AHEVCTrack.h>
 #include <bmx/mxf_op1a/OP1AUncTrack.h>
 #include <bmx/mxf_op1a/OP1AMPEG2LGTrack.h>
 #include <bmx/mxf_op1a/OP1AVC3Track.h>
@@ -210,6 +211,24 @@ OP1ATrack* OP1ATrack::Create(OP1AFile *file, uint32_t track_index, uint32_t trac
         case AVC_HIGH_444_INTRA:
         case AVC_CAVLC_444_INTRA:
             return new OP1AAVCTrack(file, track_index, track_id, track_type_number, frame_rate, essence_type);
+        case HEVC_MAIN:
+        case HEVC_MAIN_10:
+        case HEVC_MAIN_12:
+        case HEVC_MAIN_422_10:
+        case HEVC_MAIN_422_12:
+        case HEVC_MAIN_444:
+        case HEVC_MAIN_444_10:
+        case HEVC_MAIN_444_12:
+        case HEVC_MAIN_INTRA:
+        case HEVC_MAIN_10_INTRA:
+        case HEVC_MAIN_12_INTRA:
+        case HEVC_MAIN_422_10_INTRA:
+        case HEVC_MAIN_422_12_INTRA:
+        case HEVC_MAIN_444_INTRA:
+        case HEVC_MAIN_444_10_INTRA:
+        case HEVC_MAIN_444_12_INTRA:
+        case HEVC_MAIN_444_16_INTRA:
+            return new OP1AHEVCTrack(file, track_index, track_id, track_type_number, frame_rate, essence_type);
         case UNC_SD:
         case UNC_HD_1080I:
         case UNC_HD_1080P:
