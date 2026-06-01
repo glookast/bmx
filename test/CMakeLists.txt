@@ -48,3 +48,6 @@ else()
         message("-- WARNING: Disabled bmx tests because the apps are not built")
     endif()
 endif()
+
+# HEVC unit tests — no dependency on apps, runs in lib-only mode too
+add_subdirectory(hevc)
