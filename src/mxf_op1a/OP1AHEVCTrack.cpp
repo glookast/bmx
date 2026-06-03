@@ -31,6 +31,7 @@ OP1AHEVCTrack::OP1AHEVCTrack(OP1AFile *file, uint32_t track_index, uint32_t trac
     mEssenceElementKey = VIDEO_ELEMENT_KEY;
     mHEVCDescriptorHelper = dynamic_cast<HEVCMXFDescriptorHelper*>(mDescriptorHelper);
     mWrittenDuration = 0;
+    mFirstFrame = true;
 }
 
 OP1AHEVCTrack::~OP1AHEVCTrack()
@@ -110,13 +111,27 @@ void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, ui
     BMX_CHECK(num_samples == 1);
     BMX_CHECK(data && size);
 
-    mCPManager->WriteSamples(mTrackIndex, data, size, num_samples);
+    mEssenceParser.ParseFrameInfo(data, size);
 
-    // Without full HEVC bitstream parsing, treat every frame as a key frame
-    // with zero temporal offset. This produces a valid but unoptimized index
-    // table (no B-frame reordering info). Full index support requires an
-    // HEVCEssenceParser (future enhancement).
-    mIndexTable->AddIndexEntry(mTrackIndex, mWrittenDuration, 0, 0, 0x80, true, false);
+    MPEGFrameType frame_type = mEssenceParser.GetFrameType();
+    bool is_key_frame = mEssenceParser.IsIDRFrame() || mEssenceParser.IsCRAFrame() ||
+                        frame_type == I_FRAME;
+
+    if (mFirstFrame && mEssenceParser.HaveSequenceParameterSet()) {
+        mFirstFrame = false;
+        BMX_ASSERT(mHEVCDescriptorHelper);
+        mxfpp::HEVCSubDescriptor *sub = mHEVCDescriptorHelper->GetHEVCSubDescriptor();
+        sub->setHEVCProfile(mEssenceParser.GetProfile());
+        sub->setHEVCLevel(mEssenceParser.GetLevel());
+        sub->setHEVCTier(mEssenceParser.GetTier());
+    }
+
+    uint8_t flags = 0;
+    if (is_key_frame)
+        flags |= 0x80;
+
+    mCPManager->WriteSamples(mTrackIndex, data, size, num_samples);
+    mIndexTable->AddIndexEntry(mTrackIndex, mWrittenDuration, 0, 0, flags, is_key_frame, false);
     mWrittenDuration++;
 }
 

@@ -1,5 +1,6 @@
 list(APPEND bmx_sources
     essence_parser/AVCEssenceParser.cpp
+    essence_parser/HEVCEssenceParser.cpp
     essence_parser/AVCIRawEssenceReader.cpp
     essence_parser/D10RawEssenceReader.cpp
     essence_parser/DVEssenceParser.cpp

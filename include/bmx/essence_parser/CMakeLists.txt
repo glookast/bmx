@@ -1,5 +1,6 @@
 list(APPEND bmx_headers
     bmx/essence_parser/AVCEssenceParser.h
+    bmx/essence_parser/HEVCEssenceParser.h
     bmx/essence_parser/AVCIRawEssenceReader.h
     bmx/essence_parser/D10RawEssenceReader.h
     bmx/essence_parser/DVEssenceParser.h
