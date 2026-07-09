@@ -17,6 +17,9 @@ namespace bmx
 {
 
 
+class HEVCEssenceParser;
+
+
 class HEVCMXFDescriptorHelper : public PictureMXFDescriptorHelper
 {
 public:
@@ -36,6 +39,11 @@ public:
     virtual mxfpp::FileDescriptor* CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata);
     virtual void UpdateFileDescriptor();
     virtual void UpdateFileDescriptor(mxfpp::FileDescriptor *file_desc_in);
+
+    // Populate the CDCI picture geometry (stored/display/sampled dimensions, component depth and
+    // chroma subsampling) from a parsed HEVC SPS. Mirrors AVCMXFDescriptorHelper; without this the
+    // output descriptor carries StoredWidth/StoredHeight == 0 and no NLE can open the file.
+    void UpdateFileDescriptor(HEVCEssenceParser *essence_parser);
 
     mxfpp::HEVCSubDescriptor* GetHEVCSubDescriptor() const { return mHEVCSubDescriptor; }
 

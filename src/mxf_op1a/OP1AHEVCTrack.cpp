@@ -120,6 +120,12 @@ void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, ui
     if (mFirstFrame && mEssenceParser.HaveSequenceParameterSet()) {
         mFirstFrame = false;
         BMX_ASSERT(mHEVCDescriptorHelper);
+
+        // Populate the CDCI picture geometry (dimensions, component depth, subsampling) from the
+        // parsed SPS. Without this the file descriptor has StoredWidth/StoredHeight == 0 and no
+        // NLE (Avid, Premiere) can open the output.
+        mHEVCDescriptorHelper->UpdateFileDescriptor(&mEssenceParser);
+
         mxfpp::HEVCSubDescriptor *sub = mHEVCDescriptorHelper->GetHEVCSubDescriptor();
         sub->setHEVCProfile(mEssenceParser.GetProfile());
         sub->setHEVCLevel(mEssenceParser.GetLevel());

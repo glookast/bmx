@@ -10,6 +10,7 @@
 #endif
 
 #include <bmx/mxf_helper/HEVCMXFDescriptorHelper.h>
+#include <bmx/essence_parser/HEVCEssenceParser.h>
 #include <bmx/Utils.h>
 #include <bmx/BMXException.h>
 #include <bmx/Logging.h>
@@ -199,6 +200,65 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(FileDescriptor *file_desc_in)
     SET_PROPERTY(BlackRefLevel)
     SET_PROPERTY(WhiteReflevel)
     SET_PROPERTY(ColorRange)
+}
+
+void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_parser)
+{
+    UpdateFileDescriptor();
+
+    CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
+    BMX_ASSERT(cdci_descriptor);
+
+    uint32_t stored_width   = essence_parser->GetStoredWidth();
+    uint32_t stored_height  = essence_parser->GetStoredHeight();
+    uint32_t display_width  = essence_parser->GetDisplayWidth();
+    uint32_t display_height = essence_parser->GetDisplayHeight();
+    if (display_width == 0)
+        display_width = stored_width;
+    if (display_height == 0)
+        display_height = stored_height;
+
+    cdci_descriptor->setStoredWidth(stored_width);
+    cdci_descriptor->setStoredHeight(stored_height);
+    cdci_descriptor->setDisplayWidth(display_width);
+    cdci_descriptor->setDisplayHeight(display_height);
+    cdci_descriptor->setDisplayXOffset(0);
+    cdci_descriptor->setDisplayYOffset(0);
+    cdci_descriptor->setSampledWidth(stored_width);
+    cdci_descriptor->setSampledHeight(stored_height);
+    cdci_descriptor->setSampledXOffset(0);
+    cdci_descriptor->setSampledYOffset(0);
+    cdci_descriptor->setImageStartOffset(0);
+    cdci_descriptor->setPaddingBits(0);
+
+    if (essence_parser->GetComponentDepth() > 0)
+        cdci_descriptor->setComponentDepth(essence_parser->GetComponentDepth());
+
+    // Chroma subsampling from chroma_format_idc (ITU-T H.265 / SMPTE ST 381-5)
+    switch (essence_parser->GetChromaFormat())
+    {
+        case 1: // 4:2:0
+            cdci_descriptor->setHorizontalSubsampling(2);
+            cdci_descriptor->setVerticalSubsampling(2);
+            if (!cdci_descriptor->haveColorSiting())
+                SetColorSitingMod(MXF_COLOR_SITING_VERT_MIDPOINT);
+            break;
+        case 2: // 4:2:2
+            cdci_descriptor->setHorizontalSubsampling(2);
+            cdci_descriptor->setVerticalSubsampling(1);
+            if (!cdci_descriptor->haveColorSiting())
+                SetColorSitingMod(MXF_COLOR_SITING_COSITING);
+            break;
+        case 3: // 4:4:4
+            cdci_descriptor->setHorizontalSubsampling(1);
+            cdci_descriptor->setVerticalSubsampling(1);
+            if (!cdci_descriptor->haveColorSiting())
+                SetColorSitingMod(MXF_COLOR_SITING_COSITING);
+            break;
+        case 0: // Monochrome
+        default:
+            break;
+    }
 }
 
 mxfUL HEVCMXFDescriptorHelper::ChooseEssenceContainerUL() const
