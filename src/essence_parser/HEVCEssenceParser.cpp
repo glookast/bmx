@@ -161,6 +161,8 @@ HEVCEssenceParser::HEVCEssenceParser()
     mStoredHeight = 0;
     mDisplayWidth = 0;
     mDisplayHeight = 0;
+    mDisplayXOffset = 0;
+    mDisplayYOffset = 0;
     mComponentDepth = 0;
     mChromaFormat = 0;
     mColorPrimaries = 2;
@@ -548,7 +550,6 @@ void HEVCEssenceParser::ParseSPS(const unsigned char *data, uint32_t size)
 
         uint64_t num_short_term_ref_pic_sets;
         reader.GetUE(&num_short_term_ref_pic_sets);
-        // Skip short-term ref pic sets (complex — for now we stop SPS parsing here)
 
         // Populate extracted values
         mProfile = sps.ptl.general_profile_idc;
@@ -566,15 +567,121 @@ void HEVCEssenceParser::ParseSPS(const unsigned char *data, uint32_t size)
                             (sps.conf_win_left_offset + sps.conf_win_right_offset) * sub_width_c;
             mDisplayHeight = sps.pic_height_in_luma_samples -
                              (sps.conf_win_top_offset + sps.conf_win_bottom_offset) * sub_height_c;
+            mDisplayXOffset = sps.conf_win_left_offset * sub_width_c;
+            mDisplayYOffset = sps.conf_win_top_offset * sub_height_c;
         } else {
             mDisplayWidth = mStoredWidth;
             mDisplayHeight = mStoredHeight;
+            mDisplayXOffset = 0;
+            mDisplayYOffset = 0;
         }
 
         mComponentDepth = 8 + sps.bit_depth_luma_minus8;
         mChromaFormat = sps.chroma_format_idc;
 
         mSPSMap[sps.sps_id] = sps;
+
+        // Best-effort continuation to the VUI to extract colour signalling and sample aspect
+        // ratio. Isolated in its own try so a misparse of the variable-length short-term
+        // ref-pic-sets leaves colour/SAR at their defaults without disturbing the core values
+        // already assigned above.
+        try {
+            uint32_t prev_num_delta_pocs = 0;
+            for (uint64_t idx = 0; idx < num_short_term_ref_pic_sets; idx++) {
+                uint8_t inter_ref_pic_set_prediction_flag = 0;
+                if (idx != 0)
+                    reader.GetU(1, &inter_ref_pic_set_prediction_flag);
+
+                if (inter_ref_pic_set_prediction_flag) {
+                    reader.GetF(1, &u64);   // delta_rps_sign
+                    reader.GetUE(&u64);     // abs_delta_rps_minus1
+                    uint32_t num_delta = 0;
+                    for (uint32_t j = 0; j <= prev_num_delta_pocs; j++) {
+                        uint8_t used_by_curr_pic_flag = 0;
+                        reader.GetU(1, &used_by_curr_pic_flag);
+                        uint8_t use_delta_flag = 1;
+                        if (!used_by_curr_pic_flag)
+                            reader.GetU(1, &use_delta_flag);
+                        if (used_by_curr_pic_flag || use_delta_flag)
+                            num_delta++;
+                    }
+                    prev_num_delta_pocs = num_delta;
+                } else {
+                    uint64_t num_negative_pics = 0, num_positive_pics = 0;
+                    reader.GetUE(&num_negative_pics);
+                    reader.GetUE(&num_positive_pics);
+                    for (uint64_t i = 0; i < num_negative_pics; i++) { reader.GetUE(&u64); reader.GetF(1, &u64); }
+                    for (uint64_t i = 0; i < num_positive_pics; i++) { reader.GetUE(&u64); reader.GetF(1, &u64); }
+                    prev_num_delta_pocs = (uint32_t)(num_negative_pics + num_positive_pics);
+                }
+            }
+
+            uint8_t long_term_ref_pics_present_flag = 0;
+            reader.GetU(1, &long_term_ref_pics_present_flag);
+            if (long_term_ref_pics_present_flag) {
+                uint64_t num_long_term_ref_pics_sps = 0;
+                reader.GetUE(&num_long_term_ref_pics_sps);
+                uint8_t poc_lsb_bits = (uint8_t)(sps.log2_max_pic_order_cnt_lsb_minus4 + 4);
+                for (uint64_t i = 0; i < num_long_term_ref_pics_sps; i++) {
+                    reader.GetU(poc_lsb_bits, &u64);  // lt_ref_pic_poc_lsb_sps
+                    reader.GetF(1, &u64);             // used_by_curr_pic_lt_sps_flag
+                }
+            }
+
+            reader.GetF(1, &u64);  // sps_temporal_mvp_enabled_flag
+            reader.GetF(1, &u64);  // strong_intra_smoothing_enabled_flag
+
+            uint8_t vui_parameters_present_flag = 0;
+            reader.GetU(1, &vui_parameters_present_flag);
+            if (vui_parameters_present_flag) {
+                uint8_t aspect_ratio_info_present_flag = 0;
+                reader.GetU(1, &aspect_ratio_info_present_flag);
+                if (aspect_ratio_info_present_flag) {
+                    static const int SAR_TABLE[17][2] = {
+                        {0,0},{1,1},{12,11},{10,11},{16,11},{40,33},{24,11},{20,11},
+                        {32,11},{80,33},{18,11},{15,11},{64,33},{160,99},{4,3},{3,2},{2,1}
+                    };
+                    uint8_t aspect_ratio_idc = 0;
+                    reader.GetU(8, &aspect_ratio_idc);
+                    if (aspect_ratio_idc == 255) { // EXTENDED_SAR
+                        uint64_t sar_width = 0, sar_height = 0;
+                        reader.GetU(16, &sar_width);
+                        reader.GetU(16, &sar_height);
+                        if (sar_width > 0 && sar_height > 0) {
+                            mSampleAspectRatio.numerator   = (int32_t)sar_width;
+                            mSampleAspectRatio.denominator = (int32_t)sar_height;
+                        }
+                    } else if (aspect_ratio_idc >= 1 && aspect_ratio_idc <= 16) {
+                        mSampleAspectRatio.numerator   = SAR_TABLE[aspect_ratio_idc][0];
+                        mSampleAspectRatio.denominator = SAR_TABLE[aspect_ratio_idc][1];
+                    }
+                }
+
+                uint8_t overscan_info_present_flag = 0;
+                reader.GetU(1, &overscan_info_present_flag);
+                if (overscan_info_present_flag)
+                    reader.GetF(1, &u64);  // overscan_appropriate_flag
+
+                uint8_t video_signal_type_present_flag = 0;
+                reader.GetU(1, &video_signal_type_present_flag);
+                if (video_signal_type_present_flag) {
+                    reader.GetF(3, &u64);  // video_format
+                    reader.GetF(1, &u64);  // video_full_range_flag
+                    uint8_t colour_description_present_flag = 0;
+                    reader.GetU(1, &colour_description_present_flag);
+                    if (colour_description_present_flag) {
+                        uint8_t colour_primaries = 0, transfer_characteristics = 0, matrix_coeffs = 0;
+                        reader.GetU(8, &colour_primaries);
+                        reader.GetU(8, &transfer_characteristics);
+                        reader.GetU(8, &matrix_coeffs);
+                        mColorPrimaries          = colour_primaries;
+                        mTransferCharacteristics = transfer_characteristics;
+                        mMatrixCoefficients      = matrix_coeffs;
+                    }
+                }
+            }
+        } catch (...) {
+        }
 
     } catch (...) {
     }

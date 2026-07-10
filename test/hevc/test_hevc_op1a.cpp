@@ -205,6 +205,11 @@ static void test_hevc_parser_geometry()
     ASSERT_TRUE(p8.GetDisplayHeight() == 1080, "8-bit display height != 1080");
     ASSERT_TRUE(p8.GetComponentDepth() == 8, "8-bit component depth != 8");
     ASSERT_TRUE(p8.GetChromaFormat() == 1, "8-bit chroma format != 4:2:0");
+    // VUI colour signalling (the test clips are tagged BT.709 = code point 1)
+    ASSERT_TRUE(p8.GetColorPrimaries() == 1, "8-bit colour primaries not parsed from VUI (expected BT.709)");
+    ASSERT_TRUE(p8.GetTransferCharacteristics() == 1, "8-bit transfer characteristics not parsed (expected BT.709)");
+    ASSERT_TRUE(p8.GetMatrixCoefficients() == 1, "8-bit matrix coefficients not parsed (expected BT.709)");
+    ASSERT_TRUE(p8.GetSampleAspectRatio().numerator > 0, "8-bit sample aspect ratio not parsed from VUI");
 
     HEVCEssenceParser p10;
     p10.ParseFrameInfo(HEVC_PS_1080_10BIT, HEVC_PS_1080_10BIT_size);
@@ -233,7 +238,9 @@ static void test_hevc_descriptor_geometry_from_sps()
         header_metadata = new HeaderMetadata(data_model);
 
         HEVCMXFDescriptorHelper helper;
-        helper.SetEssenceType(HEVC_MAIN);
+        // Deliberately set the WRONG profile (Main 10) for an 8-bit source; the SPS-derived
+        // reconciliation must correct it to Main.
+        helper.SetEssenceType(HEVC_MAIN_10);
         helper.SetSampleRate({25, 1});
         helper.SetFrameWrapped(true);
 
@@ -246,6 +253,15 @@ static void test_hevc_descriptor_geometry_from_sps()
         ASSERT_TRUE(parser.GetStoredWidth() > 0, "parser did not extract geometry");
 
         helper.UpdateFileDescriptor(&parser);
+
+        // The coding profile must be reconciled to the SPS (8-bit Main), not the Main 10 guess.
+        ASSERT_TRUE(helper.GetEssenceType() == HEVC_MAIN,
+                     "essence profile not reconciled from SPS (expected HEVC_MAIN)");
+        // Colour metadata must be carried onto the descriptor.
+        ASSERT_TRUE(cdci->haveColorPrimaries(), "ColorPrimaries not set from SPS VUI");
+        ASSERT_TRUE(cdci->haveCaptureGamma(), "CaptureGamma (transfer) not set from SPS VUI");
+        ASSERT_TRUE(cdci->haveCodingEquations(), "CodingEquations (matrix) not set from SPS VUI");
+        ASSERT_TRUE(cdci->haveAspectRatio(), "AspectRatio not derived from SPS VUI");
 
         // The core regression: dimensions must be present and non-zero, and must match
         // what the parser extracted from the SPS.

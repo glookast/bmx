@@ -110,6 +110,8 @@ public:
     uint32_t GetStoredHeight() const         { return mStoredHeight; }
     uint32_t GetDisplayWidth() const         { return mDisplayWidth; }
     uint32_t GetDisplayHeight() const        { return mDisplayHeight; }
+    uint32_t GetDisplayXOffset() const       { return mDisplayXOffset; }
+    uint32_t GetDisplayYOffset() const       { return mDisplayYOffset; }
     uint32_t GetComponentDepth() const       { return mComponentDepth; }
     uint8_t GetChromaFormat() const          { return mChromaFormat; }
     uint8_t GetColorPrimaries() const        { return mColorPrimaries; }
@@ -213,6 +215,8 @@ private:
     uint32_t mStoredHeight;
     uint32_t mDisplayWidth;
     uint32_t mDisplayHeight;
+    uint32_t mDisplayXOffset;
+    uint32_t mDisplayYOffset;
     uint32_t mComponentDepth;
     uint8_t mChromaFormat;
     uint8_t mColorPrimaries;

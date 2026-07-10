@@ -53,6 +53,12 @@ protected:
 private:
     void UpdateEssenceIndex();
 
+    // Map SPS VUI colour signalling (H.265 shares the H.264 / H.273 code points) onto the
+    // CDCI descriptor's ColorPrimaries / CaptureGamma / CodingEquations.
+    void MapColorPrimaries(uint8_t hevc_value);
+    void MapTransferCharacteristic(uint8_t hevc_value);
+    void MapMatrixCoefficients(uint8_t hevc_value);
+
 private:
     size_t mEssenceIndex;
     mxfpp::HEVCSubDescriptor *mHEVCSubDescriptor;

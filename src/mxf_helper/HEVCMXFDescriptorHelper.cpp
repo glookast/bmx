@@ -202,9 +202,74 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(FileDescriptor *file_desc_in)
     SET_PROPERTY(ColorRange)
 }
 
+void HEVCMXFDescriptorHelper::MapColorPrimaries(uint8_t hevc_value)
+{
+    CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
+    BMX_ASSERT(cdci_descriptor);
+
+    switch (hevc_value) {
+        case 1:  cdci_descriptor->setColorPrimaries(ITU709_COLOR_PRIM);     break;
+        case 4:
+        case 5:  cdci_descriptor->setColorPrimaries(ITU470_PAL_COLOR_PRIM); break;
+        case 6:
+        case 7:  cdci_descriptor->setColorPrimaries(SMPTE170M_COLOR_PRIM);  break;
+        case 9:  cdci_descriptor->setColorPrimaries(ITU2020_COLOR_PRIM);    break;
+        case 10: cdci_descriptor->setColorPrimaries(SMPTE_DCDM_COLOR_PRIM); break;
+        default: break;
+    }
+}
+
+void HEVCMXFDescriptorHelper::MapTransferCharacteristic(uint8_t hevc_value)
+{
+    CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
+    BMX_ASSERT(cdci_descriptor);
+
+    switch (hevc_value) {
+        case 1:
+        case 6:  cdci_descriptor->setCaptureGamma(ITUR_BT709_TRANSFER_CH);       break;
+        case 4:
+        case 5:  cdci_descriptor->setCaptureGamma(ITUR_BT470_TRANSFER_CH);       break;
+        case 7:  cdci_descriptor->setCaptureGamma(SMPTE240M_TRANSFER_CH);        break;
+        case 8:  cdci_descriptor->setCaptureGamma(LINEAR_TRANSFER_CH);           break;
+        case 11: cdci_descriptor->setCaptureGamma(IEC6196624_XVYCC_TRANSFER_CH); break;
+        case 12: cdci_descriptor->setCaptureGamma(ITU1361_TRANSFER_CH);          break;
+        case 14:
+        case 15: cdci_descriptor->setCaptureGamma(ITU2020_TRANSFER_CH);          break;
+        case 16: cdci_descriptor->setCaptureGamma(SMPTE_ST2084_TRANSFER_CH);     break;
+        case 17: cdci_descriptor->setCaptureGamma(SMPTE_DCDM_TRANSFER_CH);       break;
+        case 18: cdci_descriptor->setCaptureGamma(HLG_OETF_TRANSFER_CH);         break;
+        default: break;
+    }
+}
+
+void HEVCMXFDescriptorHelper::MapMatrixCoefficients(uint8_t hevc_value)
+{
+    switch (hevc_value) {
+        case 0: SetCodingEquationsMod(GBR_CODING_EQ);         break;
+        case 1: SetCodingEquationsMod(ITUR_BT709_CODING_EQ);  break;
+        case 5:
+        case 6: SetCodingEquationsMod(ITUR_BT601_CODING_EQ);  break;
+        case 7: SetCodingEquationsMod(SMPTE_240M_CODING_EQ);  break;
+        case 8: SetCodingEquationsMod(Y_CG_CO_CODING_EQ);     break;
+        case 9: SetCodingEquationsMod(ITU2020_NCL_CODING_EQ); break;
+        default: break;
+    }
+}
+
 void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_parser)
 {
-    UpdateFileDescriptor();
+    // Single source of truth: re-derive the essence profile from the actual parsed SPS so the
+    // PictureEssenceCoding UL matches the real bitstream, overriding any profile the caller
+    // guessed from a (possibly stale or unpopulated) source descriptor.
+    if (essence_parser->HaveSequenceParameterSet()) {
+        EssenceType parsed_type = essence_parser->GetEssenceType();
+        if (IsSupported(parsed_type)) {
+            mEssenceType = parsed_type;
+            UpdateEssenceIndex();
+        }
+    }
+
+    UpdateFileDescriptor();  // sets PictureEssenceCoding from the (now SPS-derived) essence index
 
     CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
     BMX_ASSERT(cdci_descriptor);
@@ -218,31 +283,32 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_pa
     if (display_height == 0)
         display_height = stored_height;
 
-    cdci_descriptor->setStoredWidth(stored_width);
-    cdci_descriptor->setStoredHeight(stored_height);
-    cdci_descriptor->setDisplayWidth(display_width);
-    cdci_descriptor->setDisplayHeight(display_height);
-    cdci_descriptor->setDisplayXOffset(0);
-    cdci_descriptor->setDisplayYOffset(0);
-    cdci_descriptor->setSampledWidth(stored_width);
-    cdci_descriptor->setSampledHeight(stored_height);
-    cdci_descriptor->setSampledXOffset(0);
-    cdci_descriptor->setSampledYOffset(0);
-    cdci_descriptor->setImageStartOffset(0);
-    cdci_descriptor->setPaddingBits(0);
+    // Only write geometry when the SPS actually yielded dimensions, so a parameter-set-less
+    // first frame never stamps StoredWidth/Height == 0 -- an unopenable file that nonetheless
+    // looks populated.
+    if (stored_width > 0 && stored_height > 0) {
+        cdci_descriptor->setStoredWidth(stored_width);
+        cdci_descriptor->setStoredHeight(stored_height);
+        cdci_descriptor->setDisplayWidth(display_width);
+        cdci_descriptor->setDisplayHeight(display_height);
+        cdci_descriptor->setDisplayXOffset(essence_parser->GetDisplayXOffset());
+        cdci_descriptor->setDisplayYOffset(essence_parser->GetDisplayYOffset());
+        cdci_descriptor->setSampledWidth(stored_width);
+        cdci_descriptor->setSampledHeight(stored_height);
+        cdci_descriptor->setSampledXOffset(0);
+        cdci_descriptor->setSampledYOffset(0);
+        cdci_descriptor->setImageStartOffset(0);
+        cdci_descriptor->setPaddingBits(0);
+    }
 
     if (essence_parser->GetComponentDepth() > 0)
         cdci_descriptor->setComponentDepth(essence_parser->GetComponentDepth());
 
-    // Chroma subsampling from chroma_format_idc (ITU-T H.265 / SMPTE ST 381-5)
+    // Chroma subsampling from chroma_format_idc (ITU-T H.265 / SMPTE ST 381-5). A CDCI descriptor
+    // must carry subsampling items, so monochrome (idc 0) and any unexpected value fall back to a
+    // valid setting rather than being left unset.
     switch (essence_parser->GetChromaFormat())
     {
-        case 1: // 4:2:0
-            cdci_descriptor->setHorizontalSubsampling(2);
-            cdci_descriptor->setVerticalSubsampling(2);
-            if (!cdci_descriptor->haveColorSiting())
-                SetColorSitingMod(MXF_COLOR_SITING_VERT_MIDPOINT);
-            break;
         case 2: // 4:2:2
             cdci_descriptor->setHorizontalSubsampling(2);
             cdci_descriptor->setVerticalSubsampling(1);
@@ -255,9 +321,35 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_pa
             if (!cdci_descriptor->haveColorSiting())
                 SetColorSitingMod(MXF_COLOR_SITING_COSITING);
             break;
-        case 0: // Monochrome
-        default:
+        case 0: // Monochrome -- no chroma planes; keep the descriptor conformant with 1:1.
+            cdci_descriptor->setHorizontalSubsampling(1);
+            cdci_descriptor->setVerticalSubsampling(1);
             break;
+        case 1: // 4:2:0
+        default:
+            cdci_descriptor->setHorizontalSubsampling(2);
+            cdci_descriptor->setVerticalSubsampling(2);
+            if (!cdci_descriptor->haveColorSiting())
+                SetColorSitingMod(MXF_COLOR_SITING_VERT_MIDPOINT);
+            break;
+    }
+
+    // Colour metadata from the SPS VUI. Without this the descriptor carries no colour primaries /
+    // transfer / matrix and HDR (BT.2020/PQ/HLG) and wide-gamut tagging is silently lost.
+    MapColorPrimaries(essence_parser->GetColorPrimaries());
+    MapTransferCharacteristic(essence_parser->GetTransferCharacteristics());
+    MapMatrixCoefficients(essence_parser->GetMatrixCoefficients());
+
+    // Display aspect ratio from the sample aspect ratio and display dimensions.
+    if (!cdci_descriptor->haveAspectRatio() &&
+        essence_parser->GetSampleAspectRatio().numerator > 0 &&
+        display_width > 0 && display_height > 0)
+    {
+        Rational sar = essence_parser->GetSampleAspectRatio();
+        Rational calc_aspect_ratio;
+        calc_aspect_ratio.numerator   = (int32_t)(sar.numerator   * display_width);
+        calc_aspect_ratio.denominator = (int32_t)(sar.denominator * display_height);
+        cdci_descriptor->setAspectRatio(reduce_rational(calc_aspect_ratio));
     }
 }
 
