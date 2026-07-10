@@ -19,9 +19,14 @@
 
 #include <bmx/EssenceType.h>
 #include <bmx/mxf_helper/HEVCMXFDescriptorHelper.h>
+#include <bmx/essence_parser/HEVCEssenceParser.h>
 #include <bmx/Utils.h>
 
+#include <libMXF++/MXF.h>
+
 #include <mxf/mxf_labels_and_keys.h>
+
+#include "hevc_param_sets.h"
 
 using namespace bmx;
 using namespace mxfpp;
@@ -187,6 +192,91 @@ static void test_descriptor_helper_creates_descriptor()
 }
 
 
+static void test_hevc_parser_geometry()
+{
+    TEST("HEVCEssenceParser extracts geometry from real SPS (8-bit and 10-bit)");
+
+    HEVCEssenceParser p8;
+    p8.ParseFrameInfo(HEVC_PS_1080_8BIT, HEVC_PS_1080_8BIT_size);
+    ASSERT_TRUE(p8.HaveSequenceParameterSet(), "8-bit SPS was not parsed");
+    ASSERT_TRUE(p8.GetStoredWidth() == 1920, "8-bit stored width != 1920");
+    ASSERT_TRUE(p8.GetStoredHeight() >= 1080, "8-bit stored height < 1080");
+    ASSERT_TRUE(p8.GetDisplayWidth() == 1920, "8-bit display width != 1920");
+    ASSERT_TRUE(p8.GetDisplayHeight() == 1080, "8-bit display height != 1080");
+    ASSERT_TRUE(p8.GetComponentDepth() == 8, "8-bit component depth != 8");
+    ASSERT_TRUE(p8.GetChromaFormat() == 1, "8-bit chroma format != 4:2:0");
+
+    HEVCEssenceParser p10;
+    p10.ParseFrameInfo(HEVC_PS_1080_10BIT, HEVC_PS_1080_10BIT_size);
+    ASSERT_TRUE(p10.HaveSequenceParameterSet(), "10-bit SPS was not parsed");
+    ASSERT_TRUE(p10.GetStoredWidth() == 1920, "10-bit stored width != 1920");
+    ASSERT_TRUE(p10.GetDisplayHeight() == 1080, "10-bit display height != 1080");
+    ASSERT_TRUE(p10.GetComponentDepth() == 10, "10-bit component depth != 10");
+    ASSERT_TRUE(p10.GetChromaFormat() == 1, "10-bit chroma format != 4:2:0");
+
+    PASS();
+}
+
+static void test_hevc_descriptor_geometry_from_sps()
+{
+    // Regression test for the descriptor-geometry bug: OP1AHEVCTrack parsed the SPS
+    // but never pushed the picture geometry to the CDCI descriptor, so the output had
+    // StoredWidth/StoredHeight == 0 and no NLE could open the file. This verifies that
+    // HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser*) propagates the
+    // parsed geometry to the descriptor.
+    TEST("HEVCMXFDescriptorHelper populates CDCI geometry from parsed SPS");
+
+    DataModel *data_model = 0;
+    HeaderMetadata *header_metadata = 0;
+    try {
+        data_model = new DataModel();
+        header_metadata = new HeaderMetadata(data_model);
+
+        HEVCMXFDescriptorHelper helper;
+        helper.SetEssenceType(HEVC_MAIN);
+        helper.SetSampleRate({25, 1});
+        helper.SetFrameWrapped(true);
+
+        FileDescriptor *file_desc = helper.CreateFileDescriptor(header_metadata);
+        CDCIEssenceDescriptor *cdci = dynamic_cast<CDCIEssenceDescriptor*>(file_desc);
+        ASSERT_TRUE(cdci != 0, "descriptor is not a CDCIEssenceDescriptor");
+
+        HEVCEssenceParser parser;
+        parser.ParseFrameInfo(HEVC_PS_1080_8BIT, HEVC_PS_1080_8BIT_size);
+        ASSERT_TRUE(parser.GetStoredWidth() > 0, "parser did not extract geometry");
+
+        helper.UpdateFileDescriptor(&parser);
+
+        // The core regression: dimensions must be present and non-zero, and must match
+        // what the parser extracted from the SPS.
+        ASSERT_TRUE(cdci->haveStoredWidth() && cdci->getStoredWidth() == parser.GetStoredWidth(),
+                     "StoredWidth not propagated from SPS");
+        ASSERT_TRUE(cdci->haveStoredHeight() && cdci->getStoredHeight() == parser.GetStoredHeight(),
+                     "StoredHeight not propagated from SPS");
+        ASSERT_TRUE(cdci->getStoredWidth() == 1920, "StoredWidth != 1920");
+        ASSERT_TRUE(cdci->getStoredHeight() >= 1080, "StoredHeight < 1080");
+        ASSERT_TRUE(cdci->haveDisplayWidth() && cdci->getDisplayWidth() == 1920, "DisplayWidth != 1920");
+        ASSERT_TRUE(cdci->haveDisplayHeight() && cdci->getDisplayHeight() == 1080, "DisplayHeight != 1080");
+        ASSERT_TRUE(cdci->haveComponentDepth() && cdci->getComponentDepth() == 8, "ComponentDepth != 8");
+        ASSERT_TRUE(cdci->haveHorizontalSubsampling() && cdci->getHorizontalSubsampling() == 2,
+                     "HorizontalSubsampling != 2 for 4:2:0");
+        ASSERT_TRUE(cdci->haveVerticalSubsampling() && cdci->getVerticalSubsampling() == 2,
+                     "VerticalSubsampling != 2 for 4:2:0");
+        ASSERT_TRUE(cdci->havePictureEssenceCoding(), "PictureEssenceCoding UL not set");
+
+        delete header_metadata;
+        delete data_model;
+        PASS();
+    }
+    catch (const std::exception &ex) {
+        delete header_metadata;
+        delete data_model;
+        printf("FAIL: exception: %s\n", ex.what());
+        return;
+    }
+}
+
+
 int main(int argc, const char **argv)
 {
     printf("HEVC MXF OP1a Unit Tests (SMPTE ST 381-5:2023)\n");
@@ -200,6 +290,8 @@ int main(int argc, const char **argv)
     test_picture_essence_coding_uls();
     test_hevc_subdescriptor_key();
     test_descriptor_helper_creates_descriptor();
+    test_hevc_parser_geometry();
+    test_hevc_descriptor_geometry_from_sps();
 
     printf("\n================================================\n");
     printf("Results: %d/%d tests passed\n", pass_count, test_count);
