@@ -258,13 +258,30 @@ void HEVCMXFDescriptorHelper::MapMatrixCoefficients(uint8_t hevc_value)
 
 void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_parser)
 {
-    // Single source of truth: re-derive the essence profile from the actual parsed SPS so the
-    // PictureEssenceCoding UL matches the real bitstream, overriding any profile the caller
-    // guessed from a (possibly stale or unpopulated) source descriptor.
+    // Single source of truth: re-derive the essence profile from the SPS's reliably-parsed bit
+    // depth and chroma format so the PictureEssenceCoding UL matches the real bitstream, overriding
+    // any profile the caller guessed from a (possibly stale or unpopulated) source descriptor.
+    // We deliberately do NOT use HEVCEssenceParser::GetEssenceType(): it maps every Range-Extensions
+    // stream (general_profile_idc == 4) to an Intra profile because the parser does not read the
+    // RExt general_intra_constraint_flag, which would mislabel a non-intra 4:2:2/4:4:4 stream as
+    // Intra (an Intra-profile decoder rejects inter frames). Choosing the non-intra variant is
+    // correct for inter streams and still decodable for intra-only ones.
     if (essence_parser->HaveSequenceParameterSet()) {
-        EssenceType parsed_type = essence_parser->GetEssenceType();
-        if (IsSupported(parsed_type)) {
-            mEssenceType = parsed_type;
+        uint32_t depth = essence_parser->GetComponentDepth();
+        EssenceType derived = mEssenceType;
+        switch (essence_parser->GetChromaFormat()) {
+            case 3: // 4:4:4
+                derived = (depth >= 12) ? HEVC_MAIN_444_12 : (depth >= 10 ? HEVC_MAIN_444_10 : HEVC_MAIN_444);
+                break;
+            case 2: // 4:2:2 (no 8-bit 4:2:2 profile exists; Main 4:2:2 10 is the minimum)
+                derived = (depth >= 12) ? HEVC_MAIN_422_12 : HEVC_MAIN_422_10;
+                break;
+            default: // 4:2:0 and monochrome
+                derived = (depth >= 12) ? HEVC_MAIN_12 : (depth >= 10 ? HEVC_MAIN_10 : HEVC_MAIN);
+                break;
+        }
+        if (IsSupported(derived)) {
+            mEssenceType = derived;
             UpdateEssenceIndex();
         }
     }
