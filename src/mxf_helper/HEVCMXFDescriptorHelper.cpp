@@ -369,7 +369,9 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_pa
         } else {
             cdci_descriptor->setBlackRefLevel(16u << shift);
             cdci_descriptor->setWhiteReflevel(235u << shift);
-            cdci_descriptor->setColorRange(225u << shift);
+            // ColorRange is a level count, not a single code point, so it does not scale
+            // linearly: 8-bit=225, 10-bit=897, 12-bit=3585 (matches UncCDCIMXFDescriptorHelper).
+            cdci_descriptor->setColorRange((224u << shift) + 1);
         }
     }
 

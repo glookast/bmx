@@ -106,6 +106,9 @@ void HEVCGetBitBuffer::GetF(uint8_t num_bits, uint64_t *value)
 
 void HEVCGetBitBuffer::GetU(uint8_t num_bits, uint8_t *value)
 {
+    if (num_bits > 8)
+        throw false;
+
     uint64_t v;
     GetRBSPBits(num_bits, &v);
     *value = (uint8_t)v;

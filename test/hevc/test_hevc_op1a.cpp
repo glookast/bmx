@@ -280,6 +280,54 @@ static void test_hevc_descriptor_geometry_from_sps()
                      "VerticalSubsampling != 2 for 4:2:0");
         ASSERT_TRUE(cdci->havePictureEssenceCoding(), "PictureEssenceCoding UL not set");
 
+        // Colour range (8-bit limited): black 16, white 235, range 225.
+        ASSERT_TRUE(cdci->haveColorRange() && cdci->getColorRange() == 225, "8-bit ColorRange != 225");
+
+        delete header_metadata;
+        delete data_model;
+        PASS();
+    }
+    catch (const std::exception &ex) {
+        delete header_metadata;
+        delete data_model;
+        printf("FAIL: exception: %s\n", ex.what());
+        return;
+    }
+}
+
+
+static void test_hevc_descriptor_color_range_10bit()
+{
+    // Regression guard: ColorRange is a level count and must NOT scale linearly for >8-bit.
+    // 10-bit limited range = 897 (not 900), matching bmx's UncCDCIMXFDescriptorHelper.
+    TEST("HEVCMXFDescriptorHelper sets correct 10-bit limited ColorRange (897)");
+
+    DataModel *data_model = 0;
+    HeaderMetadata *header_metadata = 0;
+    try {
+        data_model = new DataModel();
+        header_metadata = new HeaderMetadata(data_model);
+
+        HEVCMXFDescriptorHelper helper;
+        helper.SetEssenceType(HEVC_MAIN_10);
+        helper.SetSampleRate({25, 1});
+        helper.SetFrameWrapped(true);
+
+        FileDescriptor *file_desc = helper.CreateFileDescriptor(header_metadata);
+        CDCIEssenceDescriptor *cdci = dynamic_cast<CDCIEssenceDescriptor*>(file_desc);
+        ASSERT_TRUE(cdci != 0, "descriptor is not a CDCIEssenceDescriptor");
+
+        HEVCEssenceParser parser;
+        parser.ParseFrameInfo(HEVC_PS_1080_10BIT, HEVC_PS_1080_10BIT_size);
+        ASSERT_TRUE(parser.GetComponentDepth() == 10, "10-bit parser depth != 10");
+
+        helper.UpdateFileDescriptor(&parser);
+
+        ASSERT_TRUE(cdci->haveComponentDepth() && cdci->getComponentDepth() == 10, "ComponentDepth != 10");
+        ASSERT_TRUE(cdci->haveBlackRefLevel() && cdci->getBlackRefLevel() == 64, "10-bit BlackRefLevel != 64");
+        ASSERT_TRUE(cdci->haveWhiteReflevel() && cdci->getWhiteReflevel() == 940, "10-bit WhiteRefLevel != 940");
+        ASSERT_TRUE(cdci->haveColorRange() && cdci->getColorRange() == 897, "10-bit ColorRange != 897 (linear-scale bug)");
+
         delete header_metadata;
         delete data_model;
         PASS();
@@ -308,6 +356,7 @@ int main(int argc, const char **argv)
     test_descriptor_helper_creates_descriptor();
     test_hevc_parser_geometry();
     test_hevc_descriptor_geometry_from_sps();
+    test_hevc_descriptor_color_range_10bit();
 
     printf("\n================================================\n");
     printf("Results: %d/%d tests passed\n", pass_count, test_count);
