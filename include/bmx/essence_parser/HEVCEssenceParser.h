@@ -117,6 +117,11 @@ public:
     uint8_t GetColorPrimaries() const        { return mColorPrimaries; }
     uint8_t GetTransferCharacteristics() const { return mTransferCharacteristics; }
     uint8_t GetMatrixCoefficients() const    { return mMatrixCoefficients; }
+    bool GetVideoFullRange() const           { return mVideoFullRange; }
+    uint32_t GetSlicePicOrderCntLsb() const  { return mSlicePicOrderCntLsb; }
+    uint8_t GetLog2MaxPicOrderCntLsb() const { return mLog2MaxPicOrderCntLsb; }
+    uint8_t GetNalUnitType() const           { return mNalUnitType; }
+    uint8_t GetTemporalId() const            { return mTemporalId; }
     MPEGFrameType GetFrameType() const       { return mFrameType; }
     bool IsIDRFrame() const                  { return mIsIDRFrame; }
     bool IsCRAFrame() const                  { return mIsCRAFrame; }
@@ -222,10 +227,15 @@ private:
     uint8_t mColorPrimaries;
     uint8_t mTransferCharacteristics;
     uint8_t mMatrixCoefficients;
+    bool mVideoFullRange;
     Rational mFrameRate;
     Rational mSampleAspectRatio;
 
     MPEGFrameType mFrameType;
+    uint32_t mSlicePicOrderCntLsb;
+    uint8_t mLog2MaxPicOrderCntLsb;
+    uint8_t mNalUnitType;
+    uint8_t mTemporalId;
     bool mIsIDRFrame;
     bool mIsCRAFrame;
     bool mOffsetDataReady;

@@ -11,6 +11,7 @@
 #include <bmx/mxf_op1a/OP1APictureTrack.h>
 #include <bmx/mxf_helper/HEVCMXFDescriptorHelper.h>
 #include <bmx/essence_parser/HEVCEssenceParser.h>
+#include <bmx/writer_helper/HEVCWriterHelper.h>
 
 
 
@@ -44,6 +45,7 @@ public:
 private:
     HEVCMXFDescriptorHelper *mHEVCDescriptorHelper;
     HEVCEssenceParser mEssenceParser;
+    HEVCWriterHelper mWriterHelper;
     int64_t mWrittenDuration;
     bool mFirstFrame;
 };

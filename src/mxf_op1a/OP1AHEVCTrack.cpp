@@ -30,6 +30,7 @@ OP1AHEVCTrack::OP1AHEVCTrack(OP1AFile *file, uint32_t track_index, uint32_t trac
     mTrackNumber = MXF_MPEG_PICT_TRACK_NUM(0x01, MXF_MPEG_PICT_FRAME_WRAPPED_EE_TYPE, 0x00);
     mEssenceElementKey = VIDEO_ELEMENT_KEY;
     mHEVCDescriptorHelper = dynamic_cast<HEVCMXFDescriptorHelper*>(mDescriptorHelper);
+    mWriterHelper.SetDescriptorHelper(mHEVCDescriptorHelper);
     mWrittenDuration = 0;
     mFirstFrame = true;
 }
@@ -103,7 +104,8 @@ void OP1AHEVCTrack::PrepareWrite(uint8_t track_count)
     CompleteEssenceKeyAndTrackNum(track_count);
 
     mCPManager->RegisterPictureTrackElement(mTrackIndex, mEssenceElementKey, false);
-    mIndexTable->RegisterPictureTrackElement(mTrackIndex, false, false);
+    // enable index reordering (temporal/key-frame offsets) for long-GOP HEVC
+    mIndexTable->RegisterPictureTrackElement(mTrackIndex, false, true);
 }
 
 void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, uint32_t num_samples)
@@ -111,11 +113,8 @@ void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, ui
     BMX_CHECK(num_samples == 1);
     BMX_CHECK(data && size);
 
+    // First-frame descriptor population (geometry, colour, profile/level/tier) from the SPS.
     mEssenceParser.ParseFrameInfo(data, size);
-
-    MPEGFrameType frame_type = mEssenceParser.GetFrameType();
-    bool is_key_frame = mEssenceParser.IsIDRFrame() || mEssenceParser.IsCRAFrame() ||
-                        frame_type == I_FRAME;
 
     if (mFirstFrame && mEssenceParser.HaveSequenceParameterSet()) {
         mFirstFrame = false;
@@ -132,15 +131,41 @@ void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, ui
         sub->setHEVCTier(mEssenceParser.GetTier());
     }
 
+    // Reorder index bookkeeping: derive temporal/key-frame offsets from picture order count so
+    // long-GOP (B-frame) HEVC gets a correct index for index-driven readers such as Avid.
+    mWriterHelper.ProcessFrame(data, size);
+
+    bool require_update = true;
+    int64_t position = -1;
+    int8_t temporal_offset = 0;
+    int8_t key_frame_offset = 0;
     uint8_t flags = 0;
-    if (is_key_frame)
-        flags |= 0x80;
+    MPEGFrameType frame_type = UNKNOWN_FRAME_TYPE;
+    while (mWriterHelper.TakeCompleteIndexEntry(&position, &temporal_offset, &key_frame_offset, &flags, &frame_type)) {
+        if (position == mWriterHelper.GetFramePosition()) {
+            require_update = false;
+            break;
+        }
+        mIndexTable->UpdateIndexEntry(mTrackIndex, position, temporal_offset, key_frame_offset, flags);
+    }
+    if (require_update)
+        mWriterHelper.GetIncompleteIndexEntry(&position, &temporal_offset, &key_frame_offset, &flags, &frame_type);
 
     mCPManager->WriteSamples(mTrackIndex, data, size, num_samples);
-    mIndexTable->AddIndexEntry(mTrackIndex, mWrittenDuration, 0, 0, flags, is_key_frame, false);
+    mIndexTable->AddIndexEntry(mTrackIndex, position, temporal_offset, key_frame_offset, flags,
+                               frame_type == I_FRAME, require_update);
     mWrittenDuration++;
 }
 
 void OP1AHEVCTrack::CompleteWrite()
 {
+    mWriterHelper.CompleteProcess();
+
+    int64_t position;
+    int8_t temporal_offset;
+    int8_t key_frame_offset;
+    uint8_t flags;
+    MPEGFrameType frame_type;
+    while (mWriterHelper.TakeCompleteIndexEntry(&position, &temporal_offset, &key_frame_offset, &flags, &frame_type))
+        mIndexTable->UpdateIndexEntry(mTrackIndex, position, temporal_offset, key_frame_offset, flags);
 }

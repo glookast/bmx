@@ -168,6 +168,7 @@ HEVCEssenceParser::HEVCEssenceParser()
     mColorPrimaries = 2;
     mTransferCharacteristics = 2;
     mMatrixCoefficients = 2;
+    mVideoFullRange = false;
     mFrameRate = ZERO_RATIONAL;
     mSampleAspectRatio = ZERO_RATIONAL;
     mFrameType = UNKNOWN_FRAME_TYPE;
@@ -329,6 +330,9 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
     mFrameType = UNKNOWN_FRAME_TYPE;
     mIsIDRFrame = false;
     mIsCRAFrame = false;
+    mSlicePicOrderCntLsb = 0;
+    mNalUnitType = 0;
+    mTemporalId = 0;
 
     vector<HEVCNALReference> nals;
     ParseNALUnits(data, data_size, &nals);
@@ -346,6 +350,13 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
                 break;
             default:
                 if (IsVCLNALType(nals[i].type)) {
+                    mNalUnitType = nals[i].type;
+                    mTemporalId = (nals[i].nuh_temporal_id_plus1 > 0)
+                                      ? (uint8_t)(nals[i].nuh_temporal_id_plus1 - 1) : 0;
+                    // Parse the slice header for the slice type (trailing pictures) and the
+                    // picture order count LSB (needed for the reorder index table). Runs for IRAP
+                    // pictures too — CRA/BLA carry a POC LSB; IDR does not (POC 0).
+                    ParseSliceHeader(nals[i].data + 2, nals[i].size - 2, nals[i].type);
                     if (IsIDRNALType(nals[i].type)) {
                         mFrameType = I_FRAME;
                         mIsIDRFrame = true;
@@ -354,9 +365,6 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
                         mIsCRAFrame = true;
                     } else if (nals[i].type >= HEVC_BLA_W_LP && nals[i].type <= HEVC_BLA_N_LP) {
                         mFrameType = I_FRAME;
-                    } else {
-                        // Determine P or B from slice type in slice header
-                        ParseSliceHeader(nals[i].data + 2, nals[i].size - 2, nals[i].type);
                     }
                     return;
                 }
@@ -411,6 +419,29 @@ void HEVCEssenceParser::ParseSliceHeader(const unsigned char *data, uint32_t siz
             case 2: mFrameType = I_FRAME; break;
             default: mFrameType = UNKNOWN_FRAME_TYPE; break;
         }
+
+        // Capture the picture order count LSB for the reorder index table (H.265 7.3.6.1:
+        // pic_output_flag, colour_plane_id, then slice_pic_order_cnt_lsb; absent for IDR).
+        uint8_t sep_colour_plane_flag = 0;
+        if (mSPSMap.count(pps.sps_id)) {
+            const SPS &sps = mSPSMap[pps.sps_id];
+            sep_colour_plane_flag = sps.separate_colour_plane_flag;
+            mLog2MaxPicOrderCntLsb = (uint8_t)(sps.log2_max_pic_order_cnt_lsb_minus4 + 4);
+        }
+        if (pps.output_flag_present_flag) {
+            uint64_t pic_output_flag;
+            reader.GetF(1, &pic_output_flag);
+        }
+        if (sep_colour_plane_flag) {
+            uint64_t colour_plane_id;
+            reader.GetF(2, &colour_plane_id);
+        }
+        if (!IsIDRNALType(nal_type)) {
+            uint64_t poc_lsb = 0;
+            if (mLog2MaxPicOrderCntLsb > 0)
+                reader.GetU(mLog2MaxPicOrderCntLsb, &poc_lsb);
+            mSlicePicOrderCntLsb = (uint32_t)poc_lsb;
+        }
     } catch (...) {
         // Bitstream parsing error — leave frame type as unknown
     }
@@ -434,19 +465,32 @@ void HEVCEssenceParser::ParseProfileTierLevel(HEVCGetBitBuffer &reader, ProfileT
 
     reader.GetU(8, &ptl->general_level_idc);
 
-    // sub_layer_profile_present_flag and sub_layer_level_present_flag
+    // sub_layer_profile_present_flag[i] / sub_layer_level_present_flag[i]
+    uint8_t sub_layer_profile_present_flag[8] = {0};
+    uint8_t sub_layer_level_present_flag[8] = {0};
     for (uint8_t i = 0; i < max_sub_layers_minus1; i++) {
-        reader.GetF(1, &u64); // sub_layer_profile_present_flag
-        reader.GetF(1, &u64); // sub_layer_level_present_flag
+        reader.GetU(1, &sub_layer_profile_present_flag[i]);
+        reader.GetU(1, &sub_layer_level_present_flag[i]);
     }
 
     if (max_sub_layers_minus1 > 0) {
-        for (uint8_t i = max_sub_layers_minus1; i < 8; i++) {
+        for (uint8_t i = max_sub_layers_minus1; i < 8; i++)
             reader.GetF(2, &u64); // reserved_zero_2bits
-        }
     }
 
-    // Skip sub-layer profile/tier/level data (simplified — we only use general)
+    // Per-sub-layer profile_tier_level payload (H.265 7.3.3). This MUST be consumed so the bit
+    // cursor stays aligned for everything the caller parses after the PTL (SPS geometry, VUI).
+    // A temporally-scalable stream (max_sub_layers_minus1 > 0 with present flags set) otherwise
+    // misaligns every subsequent field.
+    for (uint8_t i = 0; i < max_sub_layers_minus1; i++) {
+        if (sub_layer_profile_present_flag[i]) {
+            reader.GetF(8, &u64);  // sub_layer_profile_space(2) + tier_flag(1) + profile_idc(5)
+            reader.GetF(32, &u64); // sub_layer_profile_compatibility_flag[32]
+            reader.GetF(48, &u64); // source flags + constraint/reserved + inbld = 48
+        }
+        if (sub_layer_level_present_flag[i])
+            reader.GetF(8, &u64);  // sub_layer_level_idc
+    }
 }
 
 void HEVCEssenceParser::ParseVPS(const unsigned char *data, uint32_t size)
@@ -458,8 +502,8 @@ void HEVCEssenceParser::ParseVPS(const unsigned char *data, uint32_t size)
 
         uint64_t u64;
         reader.GetU(4, &vps.vps_id);
-        reader.GetF(6, &u64); // vps_reserved_three_2bits + vps_max_layers_minus1(partial)
-        vps.vps_max_layers_minus1 = (uint8_t)((u64 >> 2) & 0x3F);
+        reader.GetF(2, &u64); // vps_base_layer_internal_flag + vps_base_layer_available_flag
+        reader.GetU(6, &vps.vps_max_layers_minus1); // vps_max_layers_minus1
         reader.GetU(3, &vps.vps_max_sub_layers_minus1);
         reader.GetU(1, &vps.vps_temporal_id_nesting_flag);
         reader.GetF(16, &u64); // vps_reserved_0xffff_16bits
@@ -532,7 +576,29 @@ void HEVCEssenceParser::ParseSPS(const unsigned char *data, uint32_t size)
         if (scaling_list_enabled_flag) {
             uint8_t sps_scaling_list_data_present_flag;
             reader.GetU(1, &sps_scaling_list_data_present_flag);
-            // Skip scaling list data if present (complex nested loops)
+            if (sps_scaling_list_data_present_flag) {
+                // scaling_list_data() (H.265 7.3.4) — must be consumed or the VUI that follows
+                // misaligns and colour/SAR silently fall back to defaults.
+                int64_t s64;
+                for (int sizeId = 0; sizeId < 4; sizeId++) {
+                    for (int matrixId = 0; matrixId < 6; matrixId += (sizeId == 3) ? 3 : 1) {
+                        uint8_t scaling_list_pred_mode_flag;
+                        reader.GetU(1, &scaling_list_pred_mode_flag);
+                        if (!scaling_list_pred_mode_flag) {
+                            reader.GetUE(&u64); // scaling_list_pred_matrix_id_delta
+                        } else {
+                            int shift = 4 + (sizeId << 1);
+                            int coefNum = (1 << shift);
+                            if (coefNum > 64)
+                                coefNum = 64;
+                            if (sizeId > 1)
+                                reader.GetSE(&s64); // scaling_list_dc_coef_minus8
+                            for (int i = 0; i < coefNum; i++)
+                                reader.GetSE(&s64); // scaling_list_delta_coef
+                        }
+                    }
+                }
+            }
         }
 
         reader.GetF(1, &u64); // amp_enabled_flag
@@ -666,7 +732,9 @@ void HEVCEssenceParser::ParseSPS(const unsigned char *data, uint32_t size)
                 reader.GetU(1, &video_signal_type_present_flag);
                 if (video_signal_type_present_flag) {
                     reader.GetF(3, &u64);  // video_format
-                    reader.GetF(1, &u64);  // video_full_range_flag
+                    uint8_t video_full_range_flag = 0;
+                    reader.GetU(1, &video_full_range_flag);
+                    mVideoFullRange = (video_full_range_flag != 0);
                     uint8_t colour_description_present_flag = 0;
                     reader.GetU(1, &colour_description_present_flag);
                     if (colour_description_present_flag) {
@@ -717,19 +785,25 @@ EssenceType HEVCEssenceParser::GetEssenceType() const
     uint8_t depth = 8 + sps.bit_depth_luma_minus8;
     uint8_t chroma = sps.chroma_format_idc;
 
+    // NOTE: this classifies from general_profile_idc + bit depth + chroma only. It does NOT read
+    // the Range-Extensions general_intra_constraint_flag, so it cannot distinguish an intra-only
+    // RExt stream from a non-intra one; profile_idc == 4 is therefore reported as the non-intra
+    // variant (correct for inter streams, and still decodable for intra-only material). The OP1a
+    // descriptor path in HEVCMXFDescriptorHelper derives the coding UL the same way and does not
+    // depend on this method.
     switch (profile) {
         case 1: // Main
             return HEVC_MAIN;
         case 2: // Main 10
             if (chroma == 2) return (depth >= 12) ? HEVC_MAIN_422_12 : HEVC_MAIN_422_10;
-            if (chroma == 3) return (depth >= 12) ? HEVC_MAIN_444_12 : HEVC_MAIN_444_10;
+            if (chroma == 3) return (depth >= 12) ? HEVC_MAIN_444_12 : (depth >= 10 ? HEVC_MAIN_444_10 : HEVC_MAIN_444);
             return (depth >= 12) ? HEVC_MAIN_12 : HEVC_MAIN_10;
-        case 3: // Main Still Picture / Intra
+        case 3: // Main Still Picture (genuinely intra)
             return HEVC_MAIN_INTRA;
-        case 4: // Format range extensions
-            if (chroma == 2) return (depth >= 12) ? HEVC_MAIN_422_12_INTRA : HEVC_MAIN_422_10_INTRA;
-            if (chroma == 3) return (depth >= 12) ? HEVC_MAIN_444_12_INTRA : HEVC_MAIN_444_10_INTRA;
-            return (depth >= 12) ? HEVC_MAIN_12_INTRA : HEVC_MAIN_10_INTRA;
+        case 4: // Format range extensions (intra-vs-non-intra not distinguished — see note above)
+            if (chroma == 2) return (depth >= 12) ? HEVC_MAIN_422_12 : HEVC_MAIN_422_10;
+            if (chroma == 3) return (depth >= 12) ? HEVC_MAIN_444_12 : (depth >= 10 ? HEVC_MAIN_444_10 : HEVC_MAIN_444);
+            return (depth >= 12) ? HEVC_MAIN_12 : (depth >= 10 ? HEVC_MAIN_10 : HEVC_MAIN);
         default:
             return HEVC_MAIN_10;
     }

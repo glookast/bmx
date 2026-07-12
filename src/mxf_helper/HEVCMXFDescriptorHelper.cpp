@@ -357,6 +357,22 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_pa
     MapTransferCharacteristic(essence_parser->GetTransferCharacteristics());
     MapMatrixCoefficients(essence_parser->GetMatrixCoefficients());
 
+    // Colour range from the SPS video_full_range_flag. Without explicit black/white reference
+    // levels a conformant reader assumes a default range and mis-scales luma for full-range HEVC.
+    if (essence_parser->GetComponentDepth() > 0) {
+        uint32_t depth = essence_parser->GetComponentDepth();
+        uint32_t shift = depth - 8;
+        if (essence_parser->GetVideoFullRange()) {
+            cdci_descriptor->setBlackRefLevel(0);
+            cdci_descriptor->setWhiteReflevel((1u << depth) - 1);
+            cdci_descriptor->setColorRange(1u << depth);
+        } else {
+            cdci_descriptor->setBlackRefLevel(16u << shift);
+            cdci_descriptor->setWhiteReflevel(235u << shift);
+            cdci_descriptor->setColorRange(225u << shift);
+        }
+    }
+
     // Display aspect ratio from the sample aspect ratio and display dimensions.
     if (!cdci_descriptor->haveAspectRatio() &&
         essence_parser->GetSampleAspectRatio().numerator > 0 &&
