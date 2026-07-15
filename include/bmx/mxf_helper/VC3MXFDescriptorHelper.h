@@ -84,8 +84,6 @@ protected:
 
 private:
     // GKX (GKX-122): resolution-independent DNxHR support.
-    static bool IsSupportedRI(mxfpp::FileDescriptor *file_descriptor, mxfUL alternative_ec_label,
-                              EssenceType *essence_type);
     void UpdateFileDescriptorRI();
     uint32_t GetRIFrameSize() const;  // (profile, stored_width) -> constant frame size; throws on unsupported raster
 

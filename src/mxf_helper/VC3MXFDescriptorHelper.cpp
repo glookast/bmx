@@ -308,9 +308,19 @@ void VC3MXFDescriptorHelper::Initialize(FileDescriptor *file_descriptor, uint16_
                                              gp->getFrameLayout() == MXF_MIXED_FIELDS ||
                                              gp->getFrameLayout() == MXF_SEGMENTED_FRAME);
                     }
+                    // GKX (GKX-122): bit depth is recovered per descriptor type -- the
+                    // 4:2:2 profiles are CDCI (ComponentDepth item); 444 is RGBA, which
+                    // has no ComponentDepth in bmx's typed model, so the depth is read
+                    // back from the PixelLayout component depths (the RGBA-idiomatic home
+                    // it was written to in UpdateFileDescriptorRI).
                     CDCIEssenceDescriptor *cdci = dynamic_cast<CDCIEssenceDescriptor*>(file_descriptor);
-                    if (cdci && cdci->haveComponentDepth())
+                    RGBAEssenceDescriptor *rgba = dynamic_cast<RGBAEssenceDescriptor*>(file_descriptor);
+                    if (cdci && cdci->haveComponentDepth()) {
                         mRIComponentDepth = cdci->getComponentDepth();
+                    } else if (rgba && rgba->havePixelLayout()) {
+                        mxfRGBALayout pixel_layout = rgba->getPixelLayout();
+                        mRIComponentDepth = pixel_layout.components[0].depth;
+                    }
                     mRIRasterSet = (mRIStoredWidth != 0 && mRIStoredHeight != 0);
                     break;
                 }
@@ -365,7 +375,15 @@ void VC3MXFDescriptorHelper::SetRIRaster(uint32_t stored_width, uint32_t stored_
 
 FileDescriptor* VC3MXFDescriptorHelper::CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata)
 {
-    mFileDescriptor = new CDCIEssenceDescriptor(header_metadata);
+    // GKX (GKX-122): DNxHR 444 is an RGB-space 4:4:4 codec and MUST be written as an
+    // RGBAEssenceDescriptor (a faithful port of the mxflib legacy analyzer_vc3, which
+    // creates RGBAEssenceDescriptor_UL for the 444 case and CDCIEssenceDescriptor_UL
+    // for everything else). All the other profiles (DNxHD 1235-1260 and the four DNxHR
+    // 4:2:2 profiles HQX/HQ/SQ/LB) stay CDCI.
+    if (mIsRI && mEssenceType == VC3_DNXHR_444)
+        mFileDescriptor = new RGBAEssenceDescriptor(header_metadata);
+    else
+        mFileDescriptor = new CDCIEssenceDescriptor(header_metadata);
     UpdateFileDescriptor();
     return mFileDescriptor;
 }
@@ -430,8 +448,13 @@ void VC3MXFDescriptorHelper::UpdateFileDescriptorRI()
 {
     PictureMXFDescriptorHelper::UpdateFileDescriptor();
 
+    // GKX (GKX-122): the 444 profile is RGBA, all other RI profiles are CDCI (see
+    // CreateFileDescriptor). Recover the concrete picture descriptor accordingly.
+    GenericPictureEssenceDescriptor *pic_descriptor =
+        dynamic_cast<GenericPictureEssenceDescriptor*>(mFileDescriptor);
+    BMX_ASSERT(pic_descriptor);
     CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
-    BMX_ASSERT(cdci_descriptor);
+    RGBAEssenceDescriptor *rgba_descriptor = dynamic_cast<RGBAEssenceDescriptor*>(mFileDescriptor);
 
     BMX_CHECK_M(mRIRasterSet && mRIStoredWidth != 0 && mRIStoredHeight != 0,
                 ("DNxHR resolution-independent essence requires the source raster to be set "
@@ -443,51 +466,84 @@ void VC3MXFDescriptorHelper::UpdateFileDescriptorRI()
     // back to the profile-nominal depth (444/HQX = 10-bit, HQ/SQ/LB = 8-bit).
     uint32_t component_depth = (mRIComponentDepth != 0) ? mRIComponentDepth : ri.nominal_component_depth;
 
-    cdci_descriptor->setPictureEssenceCoding(ri.pc_label);
-    cdci_descriptor->setSignalStandard(MXF_SIGNAL_STANDARD_NONE);
+    // Fields common to both descriptor types. Faithful port of the mxflib legacy
+    // analyzer_vc3::build_descriptor, which writes SampleRate/FrameLayout/geometry/
+    // VideoLineMap/ComponentDepth/PictureEssenceCoding on BOTH the CDCI and the RGBA
+    // (444) descriptor.
+    pic_descriptor->setPictureEssenceCoding(ri.pc_label);
+    pic_descriptor->setSignalStandard(MXF_SIGNAL_STANDARD_NONE);
 
     mxfVideoLineMap video_line_map;
     if (mRIInterlaced) {
-        cdci_descriptor->setFrameLayout(MXF_SEPARATE_FIELDS);
+        pic_descriptor->setFrameLayout(MXF_SEPARATE_FIELDS);
         video_line_map.first = 21;
         video_line_map.second = 584;
     } else {
-        cdci_descriptor->setFrameLayout(MXF_FULL_FRAME);
+        pic_descriptor->setFrameLayout(MXF_FULL_FRAME);
         video_line_map.first = 42;
         video_line_map.second = 0;
     }
-    cdci_descriptor->setVideoLineMap(video_line_map);
+    pic_descriptor->setVideoLineMap(video_line_map);
 
-    SetColorSitingMod(MXF_COLOR_SITING_REC601);
-    cdci_descriptor->setComponentDepth(component_depth);
-    if (component_depth == 10) {
-        cdci_descriptor->setBlackRefLevel(64);
-        cdci_descriptor->setWhiteReflevel(940);
-        cdci_descriptor->setColorRange(897);
-    } else {
-        cdci_descriptor->setBlackRefLevel(16);
-        cdci_descriptor->setWhiteReflevel(235);
-        cdci_descriptor->setColorRange(225);
-    }
-    SetCodingEquationsMod(ITUR_BT709_CODING_EQ);
-
-    cdci_descriptor->setStoredWidth(mRIStoredWidth);
-    cdci_descriptor->setStoredHeight(mRIStoredHeight);
-    cdci_descriptor->setDisplayWidth(mRIStoredWidth);
-    cdci_descriptor->setDisplayHeight(mRIStoredHeight);
-    cdci_descriptor->setSampledWidth(mRIStoredWidth);
-    cdci_descriptor->setSampledHeight(mRIStoredHeight);
+    pic_descriptor->setStoredWidth(mRIStoredWidth);
+    pic_descriptor->setStoredHeight(mRIStoredHeight);
+    pic_descriptor->setDisplayWidth(mRIStoredWidth);
+    pic_descriptor->setDisplayHeight(mRIStoredHeight);
+    pic_descriptor->setSampledWidth(mRIStoredWidth);
+    pic_descriptor->setSampledHeight(mRIStoredHeight);
     if ((mFlavour & MXFDESC_AVID_FLAVOUR)) {
-        cdci_descriptor->setSampledXOffset(0);
-        cdci_descriptor->setSampledYOffset(0);
-        cdci_descriptor->setDisplayXOffset(0);
-        cdci_descriptor->setDisplayYOffset(0);
+        pic_descriptor->setSampledXOffset(0);
+        pic_descriptor->setSampledYOffset(0);
+        pic_descriptor->setDisplayXOffset(0);
+        pic_descriptor->setDisplayYOffset(0);
     }
-
-    cdci_descriptor->setHorizontalSubsampling(ri.horiz_subsampling);
-    cdci_descriptor->setVerticalSubsampling(1);
     if ((mFlavour & MXFDESC_AVID_FLAVOUR))
-        cdci_descriptor->setImageAlignmentOffset(8192);
+        pic_descriptor->setImageAlignmentOffset(8192);
+
+    if (rgba_descriptor) {
+        // GKX (GKX-122): DNxHR 444 is RGB-space 4:4:4. The legacy mxflib analyzer's 444
+        // case is a MINIMAL RGBAEssenceDescriptor -- it writes only the common picture
+        // fields (above) plus the per-component bit depth, and deliberately omits
+        // ColorSiting, BlackRefLevel/WhiteRefLevel/ColorRange, HorizontalSubsampling/
+        // VerticalSubsampling and CodingEquations (all CDCI-only colorimetry).
+        //
+        // NOTE (bmx API divergence from the mxflib reference): ComponentDepth is a
+        // CDCI-only property in bmx's typed model (RGBAEssenceDescriptor has no
+        // ComponentDepth item), so the legacy analyzer's generic SetUInt(ComponentDepth)
+        // has no direct RGBA equivalent. bmx's own RGBA helpers (UncRGBA/JPEG2000/
+        // JPEGXS) carry the bit depth in the PixelLayout component depths instead, so
+        // the resolved depth is written there -- the RGBA-idiomatic home for it.
+        mxfRGBALayout pixel_layout;
+        for (int i = 0; i < 8; i++) {
+            pixel_layout.components[i].code = 0;
+            pixel_layout.components[i].depth = 0;
+        }
+        pixel_layout.components[0].code = 'R';
+        pixel_layout.components[0].depth = (uint8_t)component_depth;
+        pixel_layout.components[1].code = 'G';
+        pixel_layout.components[1].depth = (uint8_t)component_depth;
+        pixel_layout.components[2].code = 'B';
+        pixel_layout.components[2].depth = (uint8_t)component_depth;
+        rgba_descriptor->setPixelLayout(pixel_layout);
+    } else {
+        BMX_ASSERT(cdci_descriptor);
+
+        SetColorSitingMod(MXF_COLOR_SITING_REC601);
+        cdci_descriptor->setComponentDepth(component_depth);
+        if (component_depth == 10) {
+            cdci_descriptor->setBlackRefLevel(64);
+            cdci_descriptor->setWhiteReflevel(940);
+            cdci_descriptor->setColorRange(897);
+        } else {
+            cdci_descriptor->setBlackRefLevel(16);
+            cdci_descriptor->setWhiteReflevel(235);
+            cdci_descriptor->setColorRange(225);
+        }
+        SetCodingEquationsMod(ITUR_BT709_CODING_EQ);
+
+        cdci_descriptor->setHorizontalSubsampling(ri.horiz_subsampling);
+        cdci_descriptor->setVerticalSubsampling(1);
+    }
 
     // Resolve the constant frame size now so a bad raster fails at descriptor build.
     (void)GetRIFrameSize();

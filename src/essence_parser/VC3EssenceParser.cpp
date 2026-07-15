@@ -254,6 +254,8 @@ void VC3EssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_s
         mIsProgressive = (sst == 0);
         mFrameWidth = get_uint16(data + 26);
         mFrameHeight = get_uint16(data + 24);
+        BMX_CHECK_M(mFrameHeight != 0,
+                    ("DNxHR ALPF (active-lines-per-frame / height) is zero in the frame header"));
         uint32_t sbd_bits = get_bits(data, data_size, 33 * 8, 3);
         // Honour the header's actual bit depth; fall back to the profile-nominal depth.
         if (sbd_bits == 2)
