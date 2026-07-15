@@ -154,6 +154,12 @@ typedef enum
     VC3_720P_1258,
     VC3_1080P_1259,
     VC3_1080I_1260,
+    // VC-3 / DNxHR resolution-independent (GKX-122)
+    VC3_DNXHR_444,
+    VC3_DNXHR_HQX,
+    VC3_DNXHR_HQ,
+    VC3_DNXHR_SQ,
+    VC3_DNXHR_LB,
     // Avid MJPEG
     MJPEG_2_1,
     MJPEG_3_1,

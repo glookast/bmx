@@ -293,6 +293,21 @@ static const mxfUL MXF_CMDEF_L(VC3_720P_1258)  = MXF_VC3_CMDEV_L(0x18);
 static const mxfUL MXF_CMDEF_L(VC3_1080P_1259) = MXF_VC3_CMDEV_L(0x19);
 static const mxfUL MXF_CMDEF_L(VC3_1080I_1260) = MXF_VC3_CMDEV_L(0x1a);
 
+/* GKX (GKX-122): VC-3 / DNxHR resolution-independent compression IDs 1270-1274.
+   These differ from the fixed-raster DNxHD ULs above in octet 8 (0x0d, not 0x0a);
+   octet 14 carries the profile variant. Values ported from the proven mxflib
+   legacy analyzer_vc3 (set_info_dnxhr): 444=0x24, HQX=0x25, HQ=0x26, SQ=0x27,
+   LB=0x28. Unlike the DNxHD IDs the raster is NOT encoded in the UL -- geometry
+   comes from the source track and only the profile keys the UL + frame size. */
+#define MXF_VC3_RI_CMDEV_L(variant) \
+    {0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x71, variant, 0x00, 0x00}
+
+static const mxfUL MXF_CMDEF_L(VC3_DNXHR_444) = MXF_VC3_RI_CMDEV_L(0x24);
+static const mxfUL MXF_CMDEF_L(VC3_DNXHR_HQX) = MXF_VC3_RI_CMDEV_L(0x25);
+static const mxfUL MXF_CMDEF_L(VC3_DNXHR_HQ)  = MXF_VC3_RI_CMDEV_L(0x26);
+static const mxfUL MXF_CMDEF_L(VC3_DNXHR_SQ)  = MXF_VC3_RI_CMDEV_L(0x27);
+static const mxfUL MXF_CMDEF_L(VC3_DNXHR_LB)  = MXF_VC3_RI_CMDEV_L(0x28);
+
 
 /* RDD-36 (ProRes) */
 

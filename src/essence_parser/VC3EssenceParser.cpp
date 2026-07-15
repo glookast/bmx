@@ -76,6 +76,59 @@ static const CompressionParameters COMPRESSION_PARAMETERS[] =
 };
 
 
+// GKX (GKX-122): VC-3 / DNxHR resolution-independent compression IDs 1270-1274.
+// DNxHR is resolution-INDEPENDENT, so unlike the fixed-raster DNxHD table above the
+// raster and constant frame size are NOT a function of the compression id alone --
+// they depend on the actual raster (read from the frame header) with the frame size
+// keyed by (profile, width). Ported from analyzer_vc3::set_info_dnxhr.
+static bool is_dnxhr_id(uint32_t compression_id)
+{
+    return compression_id >= 1270 && compression_id <= 1274;
+}
+
+static uint32_t dnxhr_nominal_bit_depth(uint32_t compression_id)
+{
+    // 444 (1270) and HQX (1271) are 10-bit; HQ/SQ/LB (1272/1273/1274) are 8-bit.
+    return (compression_id == 1270 || compression_id == 1271) ? 10 : 8;
+}
+
+// (profile, width) -> constant frame size, verbatim from analyzer_vc3::set_info_dnxhr.
+// Returns 0 for a width outside the supported set (1920/2048/3840/4096).
+static uint32_t dnxhr_frame_size(uint32_t compression_id, uint16_t width)
+{
+    switch (compression_id) {
+        case 1270:  // 444
+            if (width == 1920) return 0x1c0000;
+            if (width == 2048) return 1941504;
+            if (width == 3840) return 7286784;
+            if (width == 4096) return 7770112;
+            break;
+        case 1271:  // HQX (10-bit)
+        case 1272:  // HQ  (8-bit)
+            if (width == 1920) return 0xe0000;
+            if (width == 2048) return 970752;
+            if (width == 3840) return 3641344;
+            if (width == 4096) return 3887104;
+            break;
+        case 1273:  // SQ
+            if (width == 1920) return 0x94000;
+            if (width == 2048) return 643072;
+            if (width == 3840) return 2408448;
+            if (width == 4096) return 2568192;
+            break;
+        case 1274:  // LB
+            if (width == 1920) return 0x2E000;
+            if (width == 2048) return 200704;
+            if (width == 3840) return 749568;
+            if (width == 4096) return 798720;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+
 
 static uint64_t get_uint64(const unsigned char *data)
 {
@@ -162,6 +215,17 @@ uint32_t VC3EssenceParser::ParseFrameSize(const unsigned char *data, uint32_t da
             return COMPRESSION_PARAMETERS[i].frame_size;
     }
 
+    // GKX (GKX-122): resolution-independent DNxHR -- frame size is keyed by
+    // (profile, width); width is read from the frame header (samples per line).
+    if (is_dnxhr_id(compression_id)) {
+        uint16_t width = get_uint16(data + 26);
+        uint32_t frame_size = dnxhr_frame_size(compression_id, width);
+        if (frame_size != 0)
+            return frame_size;
+        // Unsupported raster width -- surface as "unknown" rather than a bogus size.
+        return ESSENCE_PARSER_NULL_FRAME_SIZE;
+    }
+
     return ESSENCE_PARSER_NULL_FRAME_SIZE;
 }
 
@@ -177,6 +241,34 @@ void VC3EssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_s
 
     // compression id
     mCompressionId = get_uint32(data + 40);
+
+    // GKX (GKX-122): resolution-independent DNxHR (1270-1274). The raster is NOT a
+    // function of the compression id, so read the geometry/depth from the frame
+    // header instead of a fixed table. SBD (sub-sampling bit depth) at bit offset
+    // 33*8 gives 10-bit (2) or 8-bit (1); SPL (samples per line) at +26 gives width;
+    // ALPF (active lines per frame) at +24 gives height. The constant frame size is
+    // keyed by (profile, width). SST (bit 0 of byte 5, checked in ParseFrameStart)
+    // distinguishes progressive (field 1 == 0) from interlaced.
+    if (is_dnxhr_id(mCompressionId)) {
+        uint8_t sst = (uint8_t)(data[5] & 0x03);
+        mIsProgressive = (sst == 0);
+        mFrameWidth = get_uint16(data + 26);
+        mFrameHeight = get_uint16(data + 24);
+        uint32_t sbd_bits = get_bits(data, data_size, 33 * 8, 3);
+        // Honour the header's actual bit depth; fall back to the profile-nominal depth.
+        if (sbd_bits == 2)
+            mBitDepth = 10;
+        else if (sbd_bits == 1)
+            mBitDepth = 8;
+        else
+            mBitDepth = (uint8_t)dnxhr_nominal_bit_depth(mCompressionId);
+        mFrameSize = dnxhr_frame_size(mCompressionId, mFrameWidth);
+        BMX_CHECK_M(mFrameSize != 0,
+                    ("Unsupported DNxHR raster width %u (compression id %u); supported widths are "
+                     "1920, 2048, 3840, 4096", mFrameWidth, mCompressionId));
+        return;
+    }
+
     size_t param_index;
     for (param_index = 0; param_index < BMX_ARRAY_SIZE(COMPRESSION_PARAMETERS); param_index++)
     {

@@ -33,6 +33,7 @@
 #define BMX_OP1A_VC3_TRACK_H_
 
 #include <bmx/mxf_op1a/OP1APictureTrack.h>
+#include <bmx/mxf_helper/VC3MXFDescriptorHelper.h>
 
 
 
@@ -46,6 +47,17 @@ public:
     OP1AVC3Track(OP1AFile *file, uint32_t track_index, uint32_t track_id, uint8_t track_type_number,
                  mxfRational frame_rate, EssenceType essence_type);
     virtual ~OP1AVC3Track();
+
+public:
+    // GKX (GKX-122): DNxHR is resolution-independent -- the caller must supply the
+    // source raster (and actual bit depth / scan) before the descriptor is created
+    // so the geometry + constant frame size can be resolved. No-op / irrelevant for
+    // the fixed-raster DNxHD essence types, which take geometry from the ID table.
+    void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
+                     bool is_interlaced);
+
+private:
+    VC3MXFDescriptorHelper *mVC3DescriptorHelper;
 };
 
 

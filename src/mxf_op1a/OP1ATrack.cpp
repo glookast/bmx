@@ -145,6 +145,11 @@ static const OP1ASampleRateSupport OP1A_SAMPLE_RATE_SUPPORT[] =
     {VC3_720P_1258,            {{-1, -1}, {0, 0}}},
     {VC3_1080P_1259,           {{-1, -1}, {0, 0}}},
     {VC3_1080I_1260,           {{-1, -1}, {0, 0}}},
+    {VC3_DNXHR_444,            {{-1, -1}, {0, 0}}},
+    {VC3_DNXHR_HQX,            {{-1, -1}, {0, 0}}},
+    {VC3_DNXHR_HQ,             {{-1, -1}, {0, 0}}},
+    {VC3_DNXHR_SQ,             {{-1, -1}, {0, 0}}},
+    {VC3_DNXHR_LB,             {{-1, -1}, {0, 0}}},
     {WAVE_PCM,                 {{48000, 1}, {0, 0}}},
     {ANC_DATA,                 {{-1, -1}, {0, 0}}},
     {VBI_DATA,                 {{-1, -1}, {0, 0}}},
@@ -277,6 +282,11 @@ OP1ATrack* OP1ATrack::Create(OP1AFile *file, uint32_t track_index, uint32_t trac
         case VC3_720P_1258:
         case VC3_1080P_1259:
         case VC3_1080I_1260:
+        case VC3_DNXHR_444:
+        case VC3_DNXHR_HQX:
+        case VC3_DNXHR_HQ:
+        case VC3_DNXHR_SQ:
+        case VC3_DNXHR_LB:
             return new OP1AVC3Track(file, track_index, track_id, track_type_number, frame_rate, essence_type);
         case WAVE_PCM:
             return new OP1APCMTrack(file, track_index, track_id, track_type_number, frame_rate, essence_type);

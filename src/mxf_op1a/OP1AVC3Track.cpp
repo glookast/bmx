@@ -53,9 +53,19 @@ OP1AVC3Track::OP1AVC3Track(OP1AFile *file, uint32_t track_index, uint32_t track_
 {
     mTrackNumber = MXF_VC3_TRACK_NUM(0x01, MXF_VC3_FRAME_WRAPPED_EE_TYPE, 0x00);
     mEssenceElementKey = VIDEO_ELEMENT_KEY;
+
+    mVC3DescriptorHelper = dynamic_cast<VC3MXFDescriptorHelper*>(mDescriptorHelper);
+    BMX_ASSERT(mVC3DescriptorHelper);
 }
 
 OP1AVC3Track::~OP1AVC3Track()
 {
+}
+
+void OP1AVC3Track::SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
+                               bool is_interlaced)
+{
+    BMX_ASSERT(mVC3DescriptorHelper);
+    mVC3DescriptorHelper->SetRIRaster(stored_width, stored_height, component_depth, is_interlaced);
 }
 

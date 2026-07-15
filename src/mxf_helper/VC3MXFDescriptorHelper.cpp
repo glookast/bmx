@@ -86,6 +86,81 @@ static const SupportedEssence SUPPORTED_ESSENCE[] =
 };
 
 
+// GKX (GKX-122): VC-3 / DNxHR resolution-independent essence.
+//
+// DNxHR is resolution-INDEPENDENT: the same compression ID is used at any raster,
+// so the descriptor geometry (stored/display width+height, frame_layout, component
+// depth, video_line_map) comes from the SOURCE raster supplied by the caller, and
+// only the PictureEssenceCoding UL byte + the constant frame size are keyed by the
+// profile. These labels/sizes are a faithful port of the proven mxflib legacy
+// analyzer_vc3::set_info_dnxhr (the reason this fork work exists -- BMX 1.6 has only
+// the fixed-raster DNxHD IDs 1235-1260 and cannot wrap 1270-1274).
+//
+// avid_resolution_id column: the Avid compression id (1270-1274). horiz_subsampling
+// column: 444 -> 1 (4:4:4), all others -> 2 (4:2:2). component_depth column is the
+// profile-nominal depth (444/HQX = 10-bit, HQ/SQ/LB = 8-bit) but the actual written
+// depth honours the source raster's real bit depth (see UpdateFileDescriptorRI).
+typedef struct
+{
+    mxfUL pc_label;
+    EssenceType essence_type;
+    int32_t resolution_id;
+    uint32_t nominal_component_depth;
+    uint32_t horiz_subsampling;
+} SupportedRIEssence;
+
+static const SupportedRIEssence SUPPORTED_RI_ESSENCE[] =
+{
+    {MXF_CMDEF_L(VC3_DNXHR_444),  VC3_DNXHR_444,  1270,  10,  1},
+    {MXF_CMDEF_L(VC3_DNXHR_HQX),  VC3_DNXHR_HQX,  1271,  10,  2},
+    {MXF_CMDEF_L(VC3_DNXHR_HQ),   VC3_DNXHR_HQ,   1272,  8,   2},
+    {MXF_CMDEF_L(VC3_DNXHR_SQ),   VC3_DNXHR_SQ,   1273,  8,   2},
+    {MXF_CMDEF_L(VC3_DNXHR_LB),   VC3_DNXHR_LB,   1274,  8,   2},
+};
+
+
+// GKX (GKX-122): constant edit-unit frame size keyed by (profile, stored_width),
+// verbatim from analyzer_vc3::set_info_dnxhr. Widths not listed throw (matching
+// the legacy, which left frame_size unset for other widths). 444 and HQX/HQ share
+// no size table; HQX (10-bit) and HQ (8-bit) share the same frame-size arm.
+static uint32_t GetRIFrameSizeForWidth(EssenceType essence_type, uint32_t width)
+{
+    switch (essence_type) {
+        case VC3_DNXHR_444:
+            if (width == 1920) return 0x1c0000; // 1835008
+            if (width == 2048) return 1941504;
+            if (width == 3840) return 7286784;
+            if (width == 4096) return 7770112;
+            break;
+        case VC3_DNXHR_HQX:
+        case VC3_DNXHR_HQ:
+            if (width == 1920) return 0xe0000;  // 917504
+            if (width == 2048) return 970752;
+            if (width == 3840) return 3641344;
+            if (width == 4096) return 3887104;
+            break;
+        case VC3_DNXHR_SQ:
+            if (width == 1920) return 0x94000;  // 606208
+            if (width == 2048) return 643072;
+            if (width == 3840) return 2408448;
+            if (width == 4096) return 2568192;
+            break;
+        case VC3_DNXHR_LB:
+            if (width == 1920) return 0x2E000;  // 188416
+            if (width == 2048) return 200704;
+            if (width == 3840) return 749568;
+            if (width == 4096) return 798720;
+            break;
+        default:
+            break;
+    }
+
+    BMX_EXCEPTION(("Unsupported DNxHR raster width %u for essence type %s; supported widths are "
+                   "1920, 2048, 3840, 4096", width, essence_type_to_string(essence_type)));
+    return 0;
+}
+
+
 
 EssenceType VC3MXFDescriptorHelper::IsSupported(FileDescriptor *file_descriptor, mxfUL alternative_ec_label)
 {
@@ -111,6 +186,12 @@ EssenceType VC3MXFDescriptorHelper::IsSupported(FileDescriptor *file_descriptor,
             return SUPPORTED_ESSENCE[i].essence_type;
     }
 
+    // GKX (GKX-122): resolution-independent DNxHR (1270-1274)
+    for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE); i++) {
+        if (mxf_equals_ul_mod_regver(&pc_label, &SUPPORTED_RI_ESSENCE[i].pc_label))
+            return SUPPORTED_RI_ESSENCE[i].essence_type;
+    }
+
     return UNKNOWN_ESSENCE_TYPE;
 }
 
@@ -119,6 +200,17 @@ bool VC3MXFDescriptorHelper::IsSupported(EssenceType essence_type)
     size_t i;
     for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
         if (essence_type == SUPPORTED_ESSENCE[i].essence_type)
+            return true;
+    }
+
+    return IsDNxHR(essence_type);
+}
+
+bool VC3MXFDescriptorHelper::IsDNxHR(EssenceType essence_type)
+{
+    size_t i;
+    for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE); i++) {
+        if (essence_type == SUPPORTED_RI_ESSENCE[i].essence_type)
             return true;
     }
 
@@ -152,6 +244,12 @@ VC3MXFDescriptorHelper::VC3MXFDescriptorHelper()
 {
     mEssenceIndex = 0;
     mEssenceType = SUPPORTED_ESSENCE[0].essence_type;
+    mIsRI = false;
+    mRIStoredWidth = 0;
+    mRIStoredHeight = 0;
+    mRIComponentDepth = 0;
+    mRIInterlaced = false;
+    mRIRasterSet = false;
 }
 
 VC3MXFDescriptorHelper::~VC3MXFDescriptorHelper()
@@ -176,12 +274,46 @@ void VC3MXFDescriptorHelper::Initialize(FileDescriptor *file_descriptor, uint16_
         GenericPictureEssenceDescriptor *pic_descriptor = dynamic_cast<GenericPictureEssenceDescriptor*>(file_descriptor);
         mxfUL pc_label = pic_descriptor->getPictureEssenceCoding();
         size_t i;
+        bool found = false;
         for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
             if (mxf_equals_ul_mod_regver(&pc_label, &SUPPORTED_ESSENCE[i].pc_label)) {
                 mEssenceIndex = i;
                 mEssenceType = SUPPORTED_ESSENCE[i].essence_type;
                 mAvidResolutionId = SUPPORTED_ESSENCE[i].resolution_id;
+                found = true;
                 break;
+            }
+        }
+
+        // GKX (GKX-122): resolution-independent DNxHR (1270-1274). Geometry is read
+        // back from the descriptor itself (not a table), since the raster is not
+        // encoded in the compression ID.
+        if (!found) {
+            for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE); i++) {
+                if (mxf_equals_ul_mod_regver(&pc_label, &SUPPORTED_RI_ESSENCE[i].pc_label)) {
+                    mIsRI = true;
+                    mEssenceIndex = i;
+                    mEssenceType = SUPPORTED_RI_ESSENCE[i].essence_type;
+                    mAvidResolutionId = SUPPORTED_RI_ESSENCE[i].resolution_id;
+
+                    GenericPictureEssenceDescriptor *gp =
+                        dynamic_cast<GenericPictureEssenceDescriptor*>(file_descriptor);
+                    if (gp) {
+                        if (gp->haveStoredWidth())
+                            mRIStoredWidth = gp->getStoredWidth();
+                        if (gp->haveStoredHeight())
+                            mRIStoredHeight = gp->getStoredHeight();
+                        if (gp->haveFrameLayout())
+                            mRIInterlaced = (gp->getFrameLayout() == MXF_SEPARATE_FIELDS ||
+                                             gp->getFrameLayout() == MXF_MIXED_FIELDS ||
+                                             gp->getFrameLayout() == MXF_SEGMENTED_FRAME);
+                    }
+                    CDCIEssenceDescriptor *cdci = dynamic_cast<CDCIEssenceDescriptor*>(file_descriptor);
+                    if (cdci && cdci->haveComponentDepth())
+                        mRIComponentDepth = cdci->getComponentDepth();
+                    mRIRasterSet = (mRIStoredWidth != 0 && mRIStoredHeight != 0);
+                    break;
+                }
             }
         }
     }
@@ -190,6 +322,23 @@ void VC3MXFDescriptorHelper::Initialize(FileDescriptor *file_descriptor, uint16_
 void VC3MXFDescriptorHelper::SetEssenceType(EssenceType essence_type)
 {
     BMX_ASSERT(!mFileDescriptor);
+
+    // GKX (GKX-122): resolution-independent DNxHR (1270-1274).
+    if (IsDNxHR(essence_type)) {
+        size_t i;
+        for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE); i++) {
+            if (SUPPORTED_RI_ESSENCE[i].essence_type == essence_type) {
+                mIsRI = true;
+                mEssenceIndex = i;
+                mAvidResolutionId = SUPPORTED_RI_ESSENCE[i].resolution_id;
+                break;
+            }
+        }
+        BMX_CHECK(i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE));
+
+        PictureMXFDescriptorHelper::SetEssenceType(essence_type);
+        return;
+    }
 
     size_t i;
     for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
@@ -204,6 +353,16 @@ void VC3MXFDescriptorHelper::SetEssenceType(EssenceType essence_type)
     PictureMXFDescriptorHelper::SetEssenceType(essence_type);
 }
 
+void VC3MXFDescriptorHelper::SetRIRaster(uint32_t stored_width, uint32_t stored_height,
+                                         uint32_t component_depth, bool is_interlaced)
+{
+    mRIStoredWidth = stored_width;
+    mRIStoredHeight = stored_height;
+    mRIComponentDepth = component_depth;
+    mRIInterlaced = is_interlaced;
+    mRIRasterSet = true;
+}
+
 FileDescriptor* VC3MXFDescriptorHelper::CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata)
 {
     mFileDescriptor = new CDCIEssenceDescriptor(header_metadata);
@@ -213,6 +372,13 @@ FileDescriptor* VC3MXFDescriptorHelper::CreateFileDescriptor(mxfpp::HeaderMetada
 
 void VC3MXFDescriptorHelper::UpdateFileDescriptor()
 {
+    // GKX (GKX-122): resolution-independent DNxHR takes a separate path -- its
+    // geometry comes from the caller-supplied raster, not the SUPPORTED_ESSENCE table.
+    if (mIsRI) {
+        UpdateFileDescriptorRI();
+        return;
+    }
+
     PictureMXFDescriptorHelper::UpdateFileDescriptor();
 
     CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
@@ -255,14 +421,98 @@ void VC3MXFDescriptorHelper::UpdateFileDescriptor()
         cdci_descriptor->setImageAlignmentOffset(8192);
 }
 
+// GKX (GKX-122): resolution-independent DNxHR descriptor. Faithful port of
+// analyzer_vc3::set_info_dnxhr: geometry (stored/display width+height, frame_layout,
+// video_line_map, component_depth) comes from the caller-supplied source raster;
+// only the PictureEssenceCoding UL byte and the constant frame size are keyed by the
+// profile. horiz_subsampling: 444 -> 1 (4:4:4), all others -> 2 (4:2:2).
+void VC3MXFDescriptorHelper::UpdateFileDescriptorRI()
+{
+    PictureMXFDescriptorHelper::UpdateFileDescriptor();
+
+    CDCIEssenceDescriptor *cdci_descriptor = dynamic_cast<CDCIEssenceDescriptor*>(mFileDescriptor);
+    BMX_ASSERT(cdci_descriptor);
+
+    BMX_CHECK_M(mRIRasterSet && mRIStoredWidth != 0 && mRIStoredHeight != 0,
+                ("DNxHR resolution-independent essence requires the source raster to be set "
+                 "(SetRIRaster) before creating the descriptor"));
+
+    const SupportedRIEssence &ri = SUPPORTED_RI_ESSENCE[mEssenceIndex];
+
+    // Component depth: honour the source's actual bit depth when supplied, else fall
+    // back to the profile-nominal depth (444/HQX = 10-bit, HQ/SQ/LB = 8-bit).
+    uint32_t component_depth = (mRIComponentDepth != 0) ? mRIComponentDepth : ri.nominal_component_depth;
+
+    cdci_descriptor->setPictureEssenceCoding(ri.pc_label);
+    cdci_descriptor->setSignalStandard(MXF_SIGNAL_STANDARD_NONE);
+
+    mxfVideoLineMap video_line_map;
+    if (mRIInterlaced) {
+        cdci_descriptor->setFrameLayout(MXF_SEPARATE_FIELDS);
+        video_line_map.first = 21;
+        video_line_map.second = 584;
+    } else {
+        cdci_descriptor->setFrameLayout(MXF_FULL_FRAME);
+        video_line_map.first = 42;
+        video_line_map.second = 0;
+    }
+    cdci_descriptor->setVideoLineMap(video_line_map);
+
+    SetColorSitingMod(MXF_COLOR_SITING_REC601);
+    cdci_descriptor->setComponentDepth(component_depth);
+    if (component_depth == 10) {
+        cdci_descriptor->setBlackRefLevel(64);
+        cdci_descriptor->setWhiteReflevel(940);
+        cdci_descriptor->setColorRange(897);
+    } else {
+        cdci_descriptor->setBlackRefLevel(16);
+        cdci_descriptor->setWhiteReflevel(235);
+        cdci_descriptor->setColorRange(225);
+    }
+    SetCodingEquationsMod(ITUR_BT709_CODING_EQ);
+
+    cdci_descriptor->setStoredWidth(mRIStoredWidth);
+    cdci_descriptor->setStoredHeight(mRIStoredHeight);
+    cdci_descriptor->setDisplayWidth(mRIStoredWidth);
+    cdci_descriptor->setDisplayHeight(mRIStoredHeight);
+    cdci_descriptor->setSampledWidth(mRIStoredWidth);
+    cdci_descriptor->setSampledHeight(mRIStoredHeight);
+    if ((mFlavour & MXFDESC_AVID_FLAVOUR)) {
+        cdci_descriptor->setSampledXOffset(0);
+        cdci_descriptor->setSampledYOffset(0);
+        cdci_descriptor->setDisplayXOffset(0);
+        cdci_descriptor->setDisplayYOffset(0);
+    }
+
+    cdci_descriptor->setHorizontalSubsampling(ri.horiz_subsampling);
+    cdci_descriptor->setVerticalSubsampling(1);
+    if ((mFlavour & MXFDESC_AVID_FLAVOUR))
+        cdci_descriptor->setImageAlignmentOffset(8192);
+
+    // Resolve the constant frame size now so a bad raster fails at descriptor build.
+    (void)GetRIFrameSize();
+}
+
+uint32_t VC3MXFDescriptorHelper::GetRIFrameSize() const
+{
+    BMX_CHECK_M(mRIStoredWidth != 0,
+                ("DNxHR resolution-independent frame size requested before the source raster was set"));
+    return GetRIFrameSizeForWidth(SUPPORTED_RI_ESSENCE[mEssenceIndex].essence_type, mRIStoredWidth);
+}
+
 uint32_t VC3MXFDescriptorHelper::GetSampleSize()
 {
+    if (mIsRI)
+        return GetRIFrameSize();
+
     return SUPPORTED_ESSENCE[mEssenceIndex].frame_size;
 }
 
 mxfUL VC3MXFDescriptorHelper::ChooseEssenceContainerUL() const
 {
-    if ((mFlavour & MXFDESC_AVID_FLAVOUR)) {
+    // GKX (GKX-122): DNxHR RI is only wrapped as plain VC3 frame/clip (no Avid
+    // OP-Atom EC labels are defined for the RI IDs), so ignore the Avid flavour.
+    if (!mIsRI && (mFlavour & MXFDESC_AVID_FLAVOUR)) {
         BMX_ASSERT(!mFrameWrapped);
         return SUPPORTED_ESSENCE[mEssenceIndex].avid_ec_label;
     } else {

@@ -62,17 +62,43 @@ public:
     // configure and create new descriptor
     virtual void SetEssenceType(EssenceType essence_type);
 
+    // GKX (GKX-122): DNxHR is resolution-independent -- the compression ID does not
+    // encode the raster. The caller supplies the source raster/depth/scan so the
+    // descriptor geometry + constant frame size can be resolved. Must be called
+    // before CreateFileDescriptor() for the DNxHR RI essence types; ignored for the
+    // fixed-raster DNxHD types (which take geometry from the SUPPORTED_ESSENCE table).
+    void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
+                     bool is_interlaced);
+
     virtual mxfpp::FileDescriptor* CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata);
     virtual void UpdateFileDescriptor();
 
 public:
     virtual uint32_t GetSampleSize();
 
+    // GKX (GKX-122): true for the DNxHR resolution-independent essence types (1270-1274).
+    static bool IsDNxHR(EssenceType essence_type);
+
 protected:
     virtual mxfUL ChooseEssenceContainerUL() const;
 
 private:
+    // GKX (GKX-122): resolution-independent DNxHR support.
+    static bool IsSupportedRI(mxfpp::FileDescriptor *file_descriptor, mxfUL alternative_ec_label,
+                              EssenceType *essence_type);
+    void UpdateFileDescriptorRI();
+    uint32_t GetRIFrameSize() const;  // (profile, stored_width) -> constant frame size; throws on unsupported raster
+
+private:
     size_t mEssenceIndex;
+
+    // GKX (GKX-122): RI (DNxHR) descriptor state -- raster supplied by the caller.
+    bool mIsRI;
+    uint32_t mRIStoredWidth;
+    uint32_t mRIStoredHeight;
+    uint32_t mRIComponentDepth;
+    bool mRIInterlaced;
+    bool mRIRasterSet;
 };
 
 
