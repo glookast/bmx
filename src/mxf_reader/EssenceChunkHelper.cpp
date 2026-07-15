@@ -43,6 +43,7 @@
 
 #include <bmx/mxf_reader/EssenceChunkHelper.h>
 #include <bmx/mxf_reader/MXFFileReader.h>
+#include <bmx/MXFUtils.h>
 #include <bmx/mxf_helper/PictureMXFDescriptorHelper.h>
 #include <bmx/BMXException.h>
 #include <bmx/Logging.h>
@@ -146,7 +147,7 @@ void EssenceChunkHelper::CreateEssenceChunkIndex(int64_t first_edit_unit_size)
                     mxf_file->skip(partitions[i]->getIndexByteCount() - (mxfKey_extlen + llen));
                 else
                     mxf_file->skip(len);
-            } else if (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key)) {
+            } else if (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key) || is_sony_picture_element(&key)) {
                 current_element_matches = (mFileReader->GetInternalTrackReaderByNumber(mxf_get_track_number(&key)) != 0);
                 if (!matched_element && current_element_matches) {
                     matched_key     = key;

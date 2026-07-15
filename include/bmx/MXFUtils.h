@@ -58,6 +58,10 @@ std::string convert_utf16_string(const unsigned char *utf16_str, uint16_t size);
 
 MXFDataDefEnum convert_essence_type_to_data_def(EssenceType essence_type);
 
+// Recognize Sony RAW / X-OCN picture essence elements, whose private generic-container
+// element keys are not matched by mxf_is_gc_essence_element(). See MXFUtils.cpp.
+bool is_sony_picture_element(const mxfKey *key);
+
 
 };
 

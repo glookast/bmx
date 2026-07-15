@@ -598,7 +598,7 @@ uint32_t EssenceReader::ReadFrameWrappedSamples(uint32_t num_samples)
 
             bool processed_metadata = mFrameMetadataReader->ProcessFrameMetadata(&key, len);
 
-            if (!processed_metadata && (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key))) {
+            if (!processed_metadata && (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key) || is_sony_picture_element(&key))) {
                 uint32_t track_number = mxf_get_track_number(&key);
                 MXFTrackReader *track_reader = 0;
                 Frame *frame = 0;
@@ -1041,7 +1041,7 @@ bool EssenceReader::SeekContentPackageStart()
         }
         else if (partition->getBodySID() == mFileReader->mBodySID &&
                  (( have_start_key && mxf_equals_key(&key, &mEssenceStartKey)) ||
-                  (!have_start_key && (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key)))))
+                  (!have_start_key && (mxf_is_gc_essence_element(&key) || mxf_avid_is_essence_element(&key) || is_sony_picture_element(&key)))))
         {
             if (mFileReader->IsClipWrapped()) {
                 // check whether this is the target essence container; skip and continue if not

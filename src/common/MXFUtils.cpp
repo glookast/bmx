@@ -153,3 +153,25 @@ MXFDataDefEnum bmx::convert_essence_type_to_data_def(EssenceType essence_type)
         default:              return MXF_UNKNOWN_DDEF;
     }
 }
+
+bool bmx::is_sony_picture_element(const mxfKey *key)
+{
+    // Sony RAW and X-OCN carry frame-wrapped picture essence under private
+    // generic-container element keys that mxf_is_gc_essence_element() rejects:
+    // their item designator is 0e 06 .. (octets 8-11) rather than the standard
+    // generic-container 0d 01 03 01. Without recognizing them the essence-container
+    // index is never built and the picture KLVs are skipped, so the picture track
+    // delivers zero frames (GKX-130). Recognize the two keys so the essence is
+    // indexed and routed to the picture track by its track number (key octets
+    // 12-15) - the same linkage the legacy mxflib reader established via
+    // RegisterGCElementKey(). The element number (octet 15) is ignored so a clip
+    // with more than one picture element still matches. The essence is passed
+    // through opaquely (generic PICTURE_ESSENCE); the Sony SDK decodes it.
+    static const mxfKey SONY_RAW_PICTURE_ELEMENT_KEY =
+        {0x06,0x0e,0x2b,0x34,0x01,0x02,0x01,0x06,0x0e,0x06,0x7f,0x03,0x15,0x01,0x7f,0x00};
+    static const mxfKey SONY_XOCN_PICTURE_ELEMENT_KEY =
+        {0x06,0x0e,0x2b,0x34,0x01,0x02,0x01,0x06,0x0e,0x06,0x0d,0x03,0x19,0x01,0x45,0x00};
+
+    return mxf_equals_key_prefix(key, &SONY_RAW_PICTURE_ELEMENT_KEY, 15) ||
+           mxf_equals_key_prefix(key, &SONY_XOCN_PICTURE_ELEMENT_KEY, 15);
+}
