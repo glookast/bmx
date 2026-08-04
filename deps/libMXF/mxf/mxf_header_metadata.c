@@ -1248,6 +1248,8 @@ void mxf_get_j2k_component_sizing(const uint8_t *value, mxfJ2KComponentSizing *r
 int mxf_get_j2k_ext_capabilities(const uint8_t *value, uint16_t value_len, mxfJ2KExtendedCapabilities *result)
 {
     uint32_t shifted_p_cap;
+    uint32_t count = 0;
+    uint32_t ccapi_at;
     int index = 0;
     int rem_len = value_len;
 
@@ -1256,9 +1258,26 @@ int mxf_get_j2k_ext_capabilities(const uint8_t *value, uint16_t value_len, mxfJ2
     rem_len -= 4;
 
     while (shifted_p_cap) {
+        if ((shifted_p_cap & 0x01))
+            count++;
+        shifted_p_cap >>= 1;
+    }
+
+    /* Ccapi is an array, so it carries the 4 byte item count and 4 byte item length header. Files
+       written before that was understood hold the elements bare, and the two are told apart by
+       length alone because they differ by exactly those 8 bytes - so both are still read. */
+    if (rem_len == (int)(8 + count * 2)) {
+        ccapi_at = 12;
+        rem_len -= 8;
+    } else {
+        ccapi_at = 4;
+    }
+
+    shifted_p_cap = result->p_cap;
+    while (shifted_p_cap) {
         CHK_ORET(rem_len >= 2);
         if ((shifted_p_cap & 0x01)) {
-            mxf_get_uint16(&value[4 + index * 2], &result->c_capi[index]);
+            mxf_get_uint16(&value[ccapi_at + index * 2], &result->c_capi[index]);
             index++;
             rem_len -= 2;
         }
@@ -1750,7 +1769,7 @@ void mxf_set_j2k_component_sizing(const mxfJ2KComponentSizing *value, uint8_t *r
 
 uint16_t mxf_get_external_j2k_ext_capabilities_size(const mxfJ2KExtendedCapabilities *value)
 {
-    uint16_t external_size = 4; /* p_cap */
+    uint16_t external_size = 4 + 8; /* p_cap + the Ccapi array count and element size */
     uint32_t shifted_p_cap = value->p_cap;
 
     while (shifted_p_cap) {
@@ -1765,12 +1784,23 @@ uint16_t mxf_get_external_j2k_ext_capabilities_size(const mxfJ2KExtendedCapabili
 void mxf_set_j2k_ext_capabilities(const mxfJ2KExtendedCapabilities *value, uint8_t *result)
 {
     uint32_t shifted_p_cap = value->p_cap;
+    uint32_t count = 0;
     int index = 0;
 
+    while (shifted_p_cap) {
+        if ((shifted_p_cap & 0x01))
+            count++;
+        shifted_p_cap >>= 1;
+    }
+
     mxf_set_uint32(value->p_cap, result);
+    mxf_set_uint32(count, &result[4]);
+    mxf_set_uint32(2, &result[8]);
+
+    shifted_p_cap = value->p_cap;
     while (shifted_p_cap) {
         if ((shifted_p_cap & 0x01)) {
-            mxf_set_uint16(value->c_capi[index], &result[4 + index * 2]);
+            mxf_set_uint16(value->c_capi[index], &result[12 + index * 2]);
             index++;
         }
         shifted_p_cap >>= 1;
