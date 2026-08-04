@@ -50,6 +50,7 @@ typedef enum
     SOD = 0xff93,
     EOC = 0xffd9,
     SIZ = 0xff51,
+    CAP = 0xff50,
     COD = 0xff52,
     COC = 0xff53,
     RGN = 0xff5e,
@@ -176,6 +177,8 @@ void J2CEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_s
                 ParseTLM(data_reader, length, &tlm_index);
             } else if (marker == SIZ) {
                 ParseSIZ(data_reader);
+            } else if (marker == CAP) {
+                ParseCAP(data_reader, length);
             } else if (marker == COD) {
                 ParseCOD(data_reader, length);
             } else if (marker == QCD) {
@@ -357,6 +360,9 @@ void J2CEssenceParser::ResetFrameInfo()
     mSPcodTransformType = 0;
     mSPcodPrecintSizes.clear();
 
+    mHaveExtendedCapabilities = false;
+    memset(&mExtendedCapabilities, 0, sizeof(mExtendedCapabilities));
+
     mSqcd = 0;
     mSPqcd.clear();
 }
@@ -419,6 +425,40 @@ void J2CEssenceParser::ParseQCD(ByteBuffer &data_reader, uint16_t length)
     mSqcd = data_reader.GetUInt8();
     if (length > 3)
         mSPqcd = data_reader.GetBytes(length - 3);
+}
+
+void J2CEssenceParser::ParseCAP(ByteBuffer &data_reader, uint16_t length)
+{
+    // ISO/IEC 15444-15 Annex A.3: Lcap(2) Pcap(4) then one Ccap_i for every bit set in Pcap, in bit
+    // order, each 2 bytes. Pcap_i is the i-th MOST significant bit, so capability 15 - the one that
+    // signals HTJ2K - is bit (32 - 15) counting from the least significant end.
+    if (length < 6)
+        throw InvalidData();
+
+    mExtendedCapabilities.p_cap = data_reader.GetUInt32();
+
+    uint32_t count = 0;
+    uint32_t i;
+    for (i = 0; i < 32; i++) {
+        if (mExtendedCapabilities.p_cap & (1u << i))
+            count++;
+    }
+    // c_capi is a fixed 32-entry array, and the count is the number of set Pcap bits. A codestream
+    // declaring more capabilities than the segment carries is malformed rather than something to
+    // tolerate, because every Ccap_i after the truncation point would be read from the wrong offset.
+    if (count > 32 || (uint32_t)(length - 6) < count * 2)
+        throw InvalidData();
+
+    for (i = 0; i < count; i++)
+        mExtendedCapabilities.c_capi[i] = data_reader.GetUInt16();
+
+    mHaveExtendedCapabilities = true;
+}
+
+bool J2CEssenceParser::IsHighThroughput()
+{
+    // Pcap15, the 15th most significant bit.
+    return mHaveExtendedCapabilities && (mExtendedCapabilities.p_cap & (1u << (32 - 15))) != 0;
 }
 
 void J2CEssenceParser::ParseTLM(ByteBuffer &data_reader, uint16_t length, map<uint8_t, TilePartData> *tlm_index)

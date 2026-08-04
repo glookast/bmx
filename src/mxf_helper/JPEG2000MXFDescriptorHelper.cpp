@@ -218,8 +218,23 @@ void JPEG2000MXFDescriptorHelper::UpdateFileDescriptor(J2CEssenceParser *essence
 
     GenericPictureEssenceDescriptor *pict_descriptor = dynamic_cast<GenericPictureEssenceDescriptor*>(mFileDescriptor);
 
+    if (essence_parser->HaveExtendedCapabilities()) {
+        // ISO/IEC 15444-15 requires the CAP marker segment, and SMPTE ST 2067-21 clause 6.5.1 Table 14
+        // makes J2KExtendedCapabilities mandatory when 15444-15 coding is used.
+        mJPEG2000SubDescriptor->setJ2KExtendedCapabilities(essence_parser->GetExtendedCapabilities());
+    }
+
     mxfUL pc_label;
-    mxf_get_jpeg2000_coding_label(essence_parser->GetProfile(), essence_parser->GetMainLevel(), essence_parser->GetSubLevel(), &pc_label);
+    if (essence_parser->IsHighThroughput()) {
+        // ST 2067-21 clause 6.2.5 requires the 15444-15 Picture Essence Coding label for HTJ2K.
+        // mxf_get_jpeg2000_coding_label() maps Rsiz onto the ISO/IEC 15444-1 variants only and has no
+        // branch that can produce this one, so it would fall through to the generic Part-1 label whose
+        // final byte says "codestreams according to ISO/IEC 15444-1" - i.e. the file would affirmatively
+        // claim to be classic Part-1, defeating the fast-fail purpose the label exists for.
+        pc_label = MXF_CMDEF_L(JPEG2000_HTJ2K_GENERIC);
+    } else {
+        mxf_get_jpeg2000_coding_label(essence_parser->GetProfile(), essence_parser->GetMainLevel(), essence_parser->GetSubLevel(), &pc_label);
+    }
     pict_descriptor->setPictureEssenceCoding(pc_label);
 
     // The MXF stored grid are set to equal the JPEG 2000 tiled grid.

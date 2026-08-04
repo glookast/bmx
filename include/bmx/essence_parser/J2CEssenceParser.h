@@ -92,6 +92,16 @@ public:
     uint8_t GetSqcd()   { return mSqcd; }
     const std::vector<unsigned char>& GetSPqcd() { return mSPqcd; }
 
+    /* The CAP marker segment, ISO/IEC 15444-15 Annex A.3. Absent in a plain ISO/IEC 15444-1
+       codestream, so HaveExtendedCapabilities() is false for one. */
+    bool HaveExtendedCapabilities()                             { return mHaveExtendedCapabilities; }
+    const mxfJ2KExtendedCapabilities& GetExtendedCapabilities() { return mExtendedCapabilities; }
+
+    /* True for a High Throughput JPEG 2000 codestream. Pcap bit 15 signals ISO/IEC 15444-15
+       capabilities, which is the only reliable discriminator: Rsiz is not required to distinguish
+       HTJ2K, and SMPTE ST 2067-21 does not constrain it for the HT constraint sets. */
+    bool IsHighThroughput();
+
 private:
     typedef struct
     {
@@ -108,6 +118,7 @@ private:
     void ParseCOD(ByteBuffer &data_reader, uint16_t length);
     void ParseTLM(ByteBuffer &data_reader, uint16_t length, std::map<uint8_t, TilePartData> *tlm_index);
     void ParseQCD(ByteBuffer &data_reader, uint16_t length);
+    void ParseCAP(ByteBuffer &data_reader, uint16_t length);
 
     void SkipTilePartData(ByteBuffer &data_reader, uint16_t tile_part_index,
                           std::map<uint8_t, TilePartData> &tlm_index, uint32_t sot_offset, uint32_t psot);
@@ -139,6 +150,9 @@ private:
 
     uint8_t mSqcd;
     std::vector<unsigned char> mSPqcd;
+
+    bool mHaveExtendedCapabilities;
+    mxfJ2KExtendedCapabilities mExtendedCapabilities;
 };
 
 
