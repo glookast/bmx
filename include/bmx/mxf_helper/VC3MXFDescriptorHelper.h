@@ -70,6 +70,10 @@ public:
     void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
                      bool is_interlaced);
 
+    // The size of every frame, when the encoder states it. Without it the size is the one the
+    // compression ID defines, which a frame carrying alpha exceeds.
+    void SetFrameSize(uint32_t frame_size);
+
     virtual mxfpp::FileDescriptor* CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata);
     virtual void UpdateFileDescriptor();
 
@@ -85,10 +89,15 @@ protected:
 private:
     // GKX (GKX-122): resolution-independent DNxHR support.
     void UpdateFileDescriptorRI();
-    uint32_t GetRIFrameSize() const;  // (profile, stored_width) -> constant frame size; throws on unsupported raster
+    uint32_t GetRIFrameSize() const;  // the size the VC-3 codec defines for the profile at the raster
+
+    bool Is444() const;
+    void UpdateRGBADescriptor(uint32_t component_depth);
+    void UpdateCDCIDefaults(uint32_t component_depth);
 
 private:
     size_t mEssenceIndex;
+    uint32_t mStatedFrameSize;
 
     // GKX (GKX-122): RI (DNxHR) descriptor state -- raster supplied by the caller.
     bool mIsRI;

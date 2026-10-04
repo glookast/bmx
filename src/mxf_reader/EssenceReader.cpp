@@ -773,6 +773,7 @@ uint32_t EssenceReader::GetConstantEditUnitSize()
         case VC3_720P_1258:
         case VC3_1080P_1259:
         case VC3_1080I_1260:
+        case VC3_1080P_1256:
         case VC3_DNXHR_444:
         case VC3_DNXHR_HQX:
         case VC3_DNXHR_HQ:

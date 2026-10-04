@@ -292,6 +292,8 @@ static const mxfUL MXF_CMDEF_L(VC3_1080P_1253) = MXF_VC3_CMDEV_L(0x13);
 static const mxfUL MXF_CMDEF_L(VC3_720P_1258)  = MXF_VC3_CMDEV_L(0x18);
 static const mxfUL MXF_CMDEF_L(VC3_1080P_1259) = MXF_VC3_CMDEV_L(0x19);
 static const mxfUL MXF_CMDEF_L(VC3_1080I_1260) = MXF_VC3_CMDEV_L(0x1a);
+/* DNxHD 444 1080p 10-bit. Octet 14 is the compression ID minus 1234, as for every ID above. */
+static const mxfUL MXF_CMDEF_L(VC3_1080P_1256) = MXF_VC3_CMDEV_L(0x16);
 
 /* GKX (GKX-122): VC-3 / DNxHR resolution-independent compression IDs 1270-1274.
    These differ from the fixed-raster DNxHD ULs above in octet 8 (0x0d, not 0x0a);

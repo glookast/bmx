@@ -4322,6 +4322,7 @@ int main(int argc, const char** argv)
                 case VC3_720P_1258:
                 case VC3_1080P_1259:
                 case VC3_1080I_1260:
+                case VC3_1080P_1256:
                     if (afd)
                         clip_track->SetAFD(afd);
                     break;

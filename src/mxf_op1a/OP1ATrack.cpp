@@ -145,6 +145,7 @@ static const OP1ASampleRateSupport OP1A_SAMPLE_RATE_SUPPORT[] =
     {VC3_720P_1258,            {{-1, -1}, {0, 0}}},
     {VC3_1080P_1259,           {{-1, -1}, {0, 0}}},
     {VC3_1080I_1260,           {{-1, -1}, {0, 0}}},
+    {VC3_1080P_1256,           {{-1, -1}, {0, 0}}},
     {VC3_DNXHR_444,            {{-1, -1}, {0, 0}}},
     {VC3_DNXHR_HQX,            {{-1, -1}, {0, 0}}},
     {VC3_DNXHR_HQ,             {{-1, -1}, {0, 0}}},
@@ -282,6 +283,7 @@ OP1ATrack* OP1ATrack::Create(OP1AFile *file, uint32_t track_index, uint32_t trac
         case VC3_720P_1258:
         case VC3_1080P_1259:
         case VC3_1080I_1260:
+        case VC3_1080P_1256:
         case VC3_DNXHR_444:
         case VC3_DNXHR_HQX:
         case VC3_DNXHR_HQ:

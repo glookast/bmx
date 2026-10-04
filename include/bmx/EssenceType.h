@@ -154,6 +154,7 @@ typedef enum
     VC3_720P_1258,
     VC3_1080P_1259,
     VC3_1080I_1260,
+    VC3_1080P_1256,
     // VC-3 / DNxHR resolution-independent (GKX-122)
     VC3_DNXHR_444,
     VC3_DNXHR_HQX,

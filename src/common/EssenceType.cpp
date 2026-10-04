@@ -151,6 +151,7 @@ static const EssenceTypeInfo ESSENCE_TYPE_INFO[] =
     {VC3_720P_1258,             PICTURE_ESSENCE,        "VC3 720p 1258",                        "VC3_720p_1258"},
     {VC3_1080P_1259,            PICTURE_ESSENCE,        "VC3 1080p 1259",                       "VC3_1080p_1259"},
     {VC3_1080I_1260,            PICTURE_ESSENCE,        "VC3 1080i 1260",                       "VC3_1080i_1260"},
+    {VC3_1080P_1256,            PICTURE_ESSENCE,        "VC3 1080p 1256",                       "VC3_1080p_1256"},
     {VC3_DNXHR_444,             PICTURE_ESSENCE,        "VC3 DNxHR 444",                        "VC3_DNxHR_444"},
     {VC3_DNXHR_HQX,             PICTURE_ESSENCE,        "VC3 DNxHR HQX",                        "VC3_DNxHR_HQX"},
     {VC3_DNXHR_HQ,              PICTURE_ESSENCE,        "VC3 DNxHR HQ",                         "VC3_DNxHR_HQ"},

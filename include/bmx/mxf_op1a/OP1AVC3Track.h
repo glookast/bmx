@@ -56,6 +56,10 @@ public:
     void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
                      bool is_interlaced);
 
+    // The size of every frame, when the encoder states it (a frame with alpha is larger than
+    // the size the compression ID defines).
+    void SetFrameSize(uint32_t frame_size);
+
 private:
     VC3MXFDescriptorHelper *mVC3DescriptorHelper;
 };
