@@ -70,10 +70,6 @@ public:
     void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
                      bool is_interlaced);
 
-    // The size of every frame, when the encoder states it. Without it the size is the one the
-    // compression ID defines, which a frame carrying alpha exceeds.
-    void SetFrameSize(uint32_t frame_size);
-
     virtual mxfpp::FileDescriptor* CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata);
     virtual void UpdateFileDescriptor();
 
@@ -82,6 +78,10 @@ public:
 
     // GKX (GKX-122): true for the DNxHR resolution-independent essence types (1270-1274).
     static bool IsDNxHR(EssenceType essence_type);
+
+    // MPS-1135: the essence type of an Avid / SMPTE VC-3 compression ID (1235 ... 1260, 1270 ... 1274),
+    // or UNKNOWN_ESSENCE_TYPE for an ID this helper cannot write.
+    static EssenceType GetEssenceType(int32_t resolution_id);
 
 protected:
     virtual mxfUL ChooseEssenceContainerUL() const;
@@ -97,7 +97,6 @@ private:
 
 private:
     size_t mEssenceIndex;
-    uint32_t mStatedFrameSize;
 
     // GKX (GKX-122): RI (DNxHR) descriptor state -- raster supplied by the caller.
     bool mIsRI;

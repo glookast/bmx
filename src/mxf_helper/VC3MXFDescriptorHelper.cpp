@@ -180,6 +180,21 @@ bool VC3MXFDescriptorHelper::IsSupported(EssenceType essence_type)
     return IsDNxHR(essence_type);
 }
 
+EssenceType VC3MXFDescriptorHelper::GetEssenceType(int32_t resolution_id)
+{
+    size_t i;
+    for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
+        if (SUPPORTED_ESSENCE[i].resolution_id == resolution_id)
+            return SUPPORTED_ESSENCE[i].essence_type;
+    }
+    for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_RI_ESSENCE); i++) {
+        if (SUPPORTED_RI_ESSENCE[i].resolution_id == resolution_id)
+            return SUPPORTED_RI_ESSENCE[i].essence_type;
+    }
+
+    return UNKNOWN_ESSENCE_TYPE;
+}
+
 bool VC3MXFDescriptorHelper::IsDNxHR(EssenceType essence_type)
 {
     size_t i;
@@ -228,7 +243,6 @@ VC3MXFDescriptorHelper::VC3MXFDescriptorHelper()
     mRIComponentDepth = 0;
     mRIInterlaced = false;
     mRIRasterSet = false;
-    mStatedFrameSize = 0;
 }
 
 VC3MXFDescriptorHelper::~VC3MXFDescriptorHelper()
@@ -286,9 +300,6 @@ void VC3MXFDescriptorHelper::Initialize(FileDescriptor *file_descriptor, uint16_
                             mRIInterlaced = (gp->getFrameLayout() == MXF_SEPARATE_FIELDS ||
                                              gp->getFrameLayout() == MXF_MIXED_FIELDS ||
                                              gp->getFrameLayout() == MXF_SEGMENTED_FRAME);
-                        // a separate-fields layout stores the height of one field; the raster is the frame's
-                        if (gp->haveFrameLayout() && gp->getFrameLayout() == MXF_SEPARATE_FIELDS)
-                            mRIStoredHeight *= 2;
                     }
                     // GKX (GKX-122): bit depth is recovered per descriptor type -- the
                     // 4:2:2 profiles are CDCI (ComponentDepth item); 444 is RGBA, which
@@ -353,11 +364,6 @@ void VC3MXFDescriptorHelper::SetRIRaster(uint32_t stored_width, uint32_t stored_
     mRIComponentDepth = component_depth;
     mRIInterlaced = is_interlaced;
     mRIRasterSet = true;
-}
-
-void VC3MXFDescriptorHelper::SetFrameSize(uint32_t frame_size)
-{
-    mStatedFrameSize = frame_size;
 }
 
 bool VC3MXFDescriptorHelper::Is444() const
@@ -440,13 +446,15 @@ void VC3MXFDescriptorHelper::UpdateCDCIDefaults(uint32_t component_depth)
     if (!BMX_OPT_PROP_IS_SET(mColorSiting))
         SetColorSitingMod(MXF_COLOR_SITING_REC601);
     cdci_descriptor->setComponentDepth(component_depth);
-    const bool ten_bit = (component_depth == 10);
+    // Video range at the picture's depth: 16, 235 and 225 levels scaled by 2^(depth - 8), as 64 / 940 /
+    // 897 at 10 bits (a 12-bit picture was given the 8-bit levels).
+    const uint32_t shift = component_depth > 8 ? component_depth - 8 : 0;
     if (!BMX_OPT_PROP_IS_SET(mBlackRefLevel))
-        cdci_descriptor->setBlackRefLevel(ten_bit ? 64 : 16);
+        cdci_descriptor->setBlackRefLevel(16u << shift);
     if (!BMX_OPT_PROP_IS_SET(mWhiteRefLevel))
-        cdci_descriptor->setWhiteReflevel(ten_bit ? 940 : 235);
+        cdci_descriptor->setWhiteReflevel(235u << shift);
     if (!BMX_OPT_PROP_IS_SET(mColorRange))
-        cdci_descriptor->setColorRange(ten_bit ? 897 : 225);
+        cdci_descriptor->setColorRange((224u << shift) + 1);
     if (!BMX_OPT_PROP_IS_SET(mCodingEquations))
         SetCodingEquationsMod(ITUR_BT709_CODING_EQ);
 }
@@ -524,14 +532,14 @@ void VC3MXFDescriptorHelper::UpdateFileDescriptorRI()
     }
     pic_descriptor->setVideoLineMap(video_line_map);
 
-    // A separate-fields layout stores the height of one field (as the 1080i DNxHD IDs above do).
-    const uint32_t stored_height = mRIInterlaced ? mRIStoredHeight / 2 : mRIStoredHeight;
+    // The frame height, interlaced or not, as GKX-122 and the mxflib analyzer_vc3 wrote it: files exist
+    // with it, and nothing produces an interlaced resolution-independent picture (the Avid SDK refuses one).
     pic_descriptor->setStoredWidth(mRIStoredWidth);
-    pic_descriptor->setStoredHeight(stored_height);
+    pic_descriptor->setStoredHeight(mRIStoredHeight);
     pic_descriptor->setDisplayWidth(mRIStoredWidth);
-    pic_descriptor->setDisplayHeight(stored_height);
+    pic_descriptor->setDisplayHeight(mRIStoredHeight);
     pic_descriptor->setSampledWidth(mRIStoredWidth);
-    pic_descriptor->setSampledHeight(stored_height);
+    pic_descriptor->setSampledHeight(mRIStoredHeight);
     if ((mFlavour & MXFDESC_AVID_FLAVOUR)) {
         pic_descriptor->setSampledXOffset(0);
         pic_descriptor->setSampledYOffset(0);
@@ -561,9 +569,6 @@ uint32_t VC3MXFDescriptorHelper::GetRIFrameSize() const
 
 uint32_t VC3MXFDescriptorHelper::GetSampleSize()
 {
-    if (mStatedFrameSize != 0)
-        return mStatedFrameSize;
-
     if (mIsRI)
         return GetRIFrameSize();
 
