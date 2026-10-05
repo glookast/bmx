@@ -15,11 +15,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include <bmx/EssenceType.h>
 #include <bmx/mxf_helper/HEVCMXFDescriptorHelper.h>
 #include <bmx/essence_parser/HEVCEssenceParser.h>
+#include <bmx/writer_helper/HEVCWriterHelper.h>
+#include <bmx/mxf_op1a/OP1ATrack.h>
 #include <bmx/Utils.h>
 
 #include <libMXF++/MXF.h>
@@ -128,6 +131,339 @@ static void test_essence_container_ul()
     ASSERT_TRUE(clip_ul.octet13 == 0x1f, "Clip-wrapped mapping kind should be 0x1f");
     ASSERT_TRUE(clip_ul.octet14 == 0x60, "Clip-wrapped byte 15 should be 0x60");
     ASSERT_TRUE(clip_ul.octet15 == 0x02, "Clip-wrapped byte 16 should be 0x02");
+
+    // Byte stream frame-wrapped = ...02206001
+    mxfUL bs_frame_ul = MXF_EC_L(HEVCByteStreamFrameWrapped);
+    mxfUL bs_clip_ul = MXF_EC_L(HEVCByteStreamClipWrapped);
+    ASSERT_TRUE(bs_frame_ul.octet13 == 0x20 && bs_frame_ul.octet14 == 0x60 && bs_frame_ul.octet15 == 0x01,
+                "Byte stream frame-wrapped should be ...02206001");
+    ASSERT_TRUE(bs_clip_ul.octet13 == 0x20 && bs_clip_ul.octet14 == 0x60 && bs_clip_ul.octet15 == 0x02,
+                "Byte stream clip-wrapped should be ...02206002");
+
+    // Readers accept both mappings
+    ASSERT_TRUE(mxf_is_hevc_ec(&frame_ul, 1) && mxf_is_hevc_ec(&bs_frame_ul, 1),
+                "mxf_is_hevc_ec should accept NAL unit stream and byte stream frame-wrapped");
+
+    PASS();
+}
+
+static void test_op1a_track_supports_hevc()
+{
+    // OP1ATrack::Create builds HEVC tracks, so OP1ATrack::IsSupported (used by ClipWriter and the
+    // bmx apps) must accept them too; bmxtranswrap dropped every HEVC track without it.
+    TEST("OP1ATrack::IsSupported accepts the HEVC essence types");
+
+    EssenceType hevc_types[] = {
+        HEVC_MAIN, HEVC_MAIN_10, HEVC_MAIN_12,
+        HEVC_MAIN_422_10, HEVC_MAIN_422_12,
+        HEVC_MAIN_444, HEVC_MAIN_444_10, HEVC_MAIN_444_12,
+        HEVC_MAIN_INTRA, HEVC_MAIN_10_INTRA, HEVC_MAIN_12_INTRA,
+        HEVC_MAIN_422_10_INTRA, HEVC_MAIN_422_12_INTRA,
+        HEVC_MAIN_444_INTRA, HEVC_MAIN_444_10_INTRA,
+        HEVC_MAIN_444_12_INTRA, HEVC_MAIN_444_16_INTRA
+    };
+    mxfRational rates[] = {{24000, 1001}, {25, 1}, {30000, 1001}, {50, 1}, {60000, 1001}};
+    for (size_t i = 0; i < sizeof(hevc_types) / sizeof(hevc_types[0]); i++) {
+        for (size_t j = 0; j < sizeof(rates) / sizeof(rates[0]); j++) {
+            ASSERT_TRUE(OP1ATrack::IsSupported(hevc_types[i], rates[j]),
+                        "HEVC essence type not supported by OP1ATrack::IsSupported");
+        }
+    }
+
+    PASS();
+}
+
+static void test_descriptor_uses_byte_stream_ec()
+{
+    // MPS-1098: the writer stores Annex B access units (start code prefixed NAL units), so the
+    // descriptor must carry the HEVC Byte Stream mapping, not the NAL Unit Stream mapping.
+    TEST("HEVCMXFDescriptorHelper labels Annex B essence with the HEVC Byte Stream mapping");
+
+    DataModel *data_model = 0;
+    HeaderMetadata *header_metadata = 0;
+    try {
+        data_model = new DataModel();
+        header_metadata = new HeaderMetadata(data_model);
+
+        HEVCMXFDescriptorHelper helper;
+        helper.SetEssenceType(HEVC_MAIN_10);
+        helper.SetSampleRate({25, 1});
+        helper.SetFrameWrapped(true);
+        FileDescriptor *file_desc = helper.CreateFileDescriptor(header_metadata);
+
+        mxfUL ec_label = file_desc->getEssenceContainer();
+        mxfUL expected = MXF_EC_L(HEVCByteStreamFrameWrapped);
+        ASSERT_TRUE(mxf_equals_ul_mod_regver(&ec_label, &expected),
+                    "frame-wrapped essence container is not HEVC Byte Stream ...02206001");
+
+        delete header_metadata;
+        delete data_model;
+        PASS();
+    }
+    catch (const std::exception &ex) {
+        delete header_metadata;
+        delete data_model;
+        printf("FAIL: exception: %s\n", ex.what());
+        return;
+    }
+}
+
+
+// Writes the start of a first slice segment header (H.265 7.3.6.1) with a PPS that has no extra
+// slice header bits, no output flag and no dependent slices, as the fixtures' PPS do.
+class SliceHeaderBits
+{
+public:
+    SliceHeaderBits() : mBitCount(0) {}
+
+    void U(uint32_t value, int num_bits)
+    {
+        for (int i = num_bits - 1; i >= 0; i--)
+            Bit((value >> i) & 1);
+    }
+
+    void UE(uint32_t value)
+    {
+        uint32_t code = value + 1;
+        int len = 0;
+        while ((code >> len) > 1)
+            len++;
+        U(0, len);
+        U(code, len + 1);
+    }
+
+    std::vector<unsigned char> Finish()
+    {
+        Bit(1);
+        while (mBitCount % 8)
+            Bit(0);
+        // stand-in for the slice data; non-zero so it can never form a start code
+        for (int i = 0; i < 4; i++)
+            mBytes.push_back(0xa5);
+        return mBytes;
+    }
+
+private:
+    void Bit(uint32_t bit)
+    {
+        if (mBitCount % 8 == 0)
+            mBytes.push_back(0);
+        if (bit)
+            mBytes.back() |= (unsigned char)(0x80 >> (mBitCount % 8));
+        mBitCount++;
+    }
+
+    std::vector<unsigned char> mBytes;
+    size_t mBitCount;
+};
+
+// slice_type: 0 = B, 1 = P, 2 = I
+static std::vector<unsigned char> make_access_unit(bool with_parameter_sets, uint8_t nal_type, uint32_t slice_type,
+                                                   uint32_t poc_lsb, uint8_t log2_max_poc_lsb)
+{
+    std::vector<unsigned char> au;
+    if (with_parameter_sets)
+        au.assign(HEVC_PS_1080_10BIT, HEVC_PS_1080_10BIT + HEVC_PS_1080_10BIT_size);
+
+    static const unsigned char start_code[] = {0x00, 0x00, 0x00, 0x01};
+    au.insert(au.end(), start_code, start_code + sizeof(start_code));
+    au.push_back((unsigned char)(nal_type << 1));
+    au.push_back(0x01); // nuh_layer_id 0, nuh_temporal_id_plus1 1
+
+    SliceHeaderBits bits;
+    bits.U(1, 1);                               // first_slice_segment_in_pic_flag
+    if (nal_type >= HEVC_BLA_W_LP && nal_type <= HEVC_CRA_NUT)
+        bits.U(0, 1);                           // no_output_of_prior_pics_flag
+    bits.UE(0);                                 // slice_pic_parameter_set_id
+    bits.UE(slice_type);
+    if (nal_type != HEVC_IDR_W_RADL && nal_type != HEVC_IDR_N_LP)
+        bits.U(poc_lsb, log2_max_poc_lsb);      // slice_pic_order_cnt_lsb
+    std::vector<unsigned char> slice = bits.Finish();
+    au.insert(au.end(), slice.begin(), slice.end());
+
+    return au;
+}
+
+static uint8_t fixture_log2_max_poc_lsb()
+{
+    HEVCEssenceParser parser;
+    std::vector<unsigned char> idr = make_access_unit(true, HEVC_IDR_N_LP, 2, 0, 0);
+    parser.ParseFrameInfo(&idr[0], (uint32_t)idr.size());
+    return parser.GetLog2MaxPicOrderCntLsb();
+}
+
+typedef struct
+{
+    int8_t temporal_offset;
+    int8_t key_frame_offset;
+    uint8_t flags;
+} TestIndexEntry;
+
+static void take_complete_entries(HEVCWriterHelper *writer_helper, std::map<int64_t, TestIndexEntry> *entries)
+{
+    int64_t position;
+    TestIndexEntry entry;
+    MPEGFrameType frame_type;
+    while (writer_helper->TakeCompleteIndexEntry(&position, &entry.temporal_offset, &entry.key_frame_offset,
+                                                 &entry.flags, &frame_type))
+    {
+        (*entries)[position] = entry;
+    }
+}
+
+typedef struct
+{
+    uint8_t nal_type;
+    uint32_t slice_type;
+    uint32_t poc_lsb;
+} TestPicture;
+
+// Runs coded pictures through HEVCWriterHelper, collecting the index entries and the sub-descriptor
+static bool index_pictures(const TestPicture *pictures, size_t count, std::map<int64_t, TestIndexEntry> *entries,
+                           HeaderMetadata *header_metadata, HEVCMXFDescriptorHelper *descriptor_helper)
+{
+    uint8_t log2_max_poc_lsb = fixture_log2_max_poc_lsb();
+    if (log2_max_poc_lsb == 0)
+        return false;
+
+    descriptor_helper->SetEssenceType(HEVC_MAIN_10);
+    descriptor_helper->SetSampleRate({25, 1});
+    descriptor_helper->SetFrameWrapped(true);
+    descriptor_helper->CreateFileDescriptor(header_metadata);
+
+    HEVCWriterHelper writer_helper;
+    writer_helper.SetDescriptorHelper(descriptor_helper);
+    for (size_t i = 0; i < count; i++) {
+        bool irap = (pictures[i].nal_type >= HEVC_BLA_W_LP && pictures[i].nal_type <= HEVC_CRA_NUT);
+        std::vector<unsigned char> au = make_access_unit(irap, pictures[i].nal_type, pictures[i].slice_type,
+                                                         pictures[i].poc_lsb, log2_max_poc_lsb);
+        writer_helper.ProcessFrame(&au[0], (uint32_t)au.size());
+        take_complete_entries(&writer_helper, entries);
+    }
+    writer_helper.CompleteProcess();
+    take_complete_entries(&writer_helper, entries);
+
+    return entries->size() == count;
+}
+
+
+static void test_hevc_parser_irap_and_parameter_sets()
+{
+    TEST("HEVCEssenceParser reports IRAP pictures and the parameter sets of each access unit");
+
+    uint8_t log2_max_poc_lsb = fixture_log2_max_poc_lsb();
+    ASSERT_TRUE(log2_max_poc_lsb > 0, "log2_max_pic_order_cnt_lsb not parsed from the fixture SPS");
+
+    HEVCEssenceParser parser;
+    std::vector<unsigned char> idr = make_access_unit(true, HEVC_IDR_N_LP, 2, 0, log2_max_poc_lsb);
+    parser.ParseFrameInfo(&idr[0], (uint32_t)idr.size());
+    ASSERT_TRUE(parser.IsIRAPFrame() && parser.IsIDRFrame(), "IDR not reported as an IRAP picture");
+    ASSERT_TRUE(parser.FrameHasVPS() && parser.FrameHasSPS() && parser.FrameHasPPS(),
+                "parameter sets of the IDR access unit not reported");
+
+    std::vector<unsigned char> trail = make_access_unit(false, HEVC_TRAIL_R, 2, 1, log2_max_poc_lsb);
+    parser.ParseFrameInfo(&trail[0], (uint32_t)trail.size());
+    ASSERT_TRUE(parser.GetFrameType() == I_FRAME, "TRAIL_R I slice not parsed as an I picture");
+    ASSERT_TRUE(!parser.IsIRAPFrame(), "TRAIL_R I picture reported as an IRAP picture");
+    ASSERT_TRUE(!parser.FrameHasVPS() && !parser.FrameHasSPS() && !parser.FrameHasPPS(),
+                "parameter sets reported for an access unit without them");
+    ASSERT_TRUE(parser.GetSlicePicOrderCntLsb() == 1, "TRAIL_R picture order count LSB not parsed");
+
+    std::vector<unsigned char> cra = make_access_unit(true, HEVC_CRA_NUT, 2, 3, log2_max_poc_lsb);
+    parser.ParseFrameInfo(&cra[0], (uint32_t)cra.size());
+    ASSERT_TRUE(parser.IsIRAPFrame() && parser.IsCRAFrame() && !parser.IsIDRFrame(),
+                "CRA not reported as a non-IDR IRAP picture");
+    ASSERT_TRUE(parser.IsVPSDataConstant() && parser.IsSPSDataConstant() && parser.IsPPSDataConstant(),
+                "identical parameter sets reported as changing");
+
+    PASS();
+}
+
+static void test_hevc_index_intra_trail_pictures()
+{
+    // MPS-1098: an "intra" capture with an IDR every 3rd picture and TRAIL_R pictures coded with
+    // I slices (and no parameter sets) in between. Only the IDR may be a key frame / random access
+    // point; the TRAIL_R pictures must point back to it.
+    TEST("HEVCWriterHelper indexes only IRAP pictures as key frames (IDR + TRAIL_R I pictures)");
+
+    static const TestPicture pictures[] = {
+        {HEVC_IDR_N_LP, 2, 0}, {HEVC_TRAIL_R, 2, 1}, {HEVC_TRAIL_R, 2, 2},
+        {HEVC_IDR_N_LP, 2, 0}, {HEVC_TRAIL_R, 2, 1}, {HEVC_TRAIL_R, 2, 2},
+        {HEVC_IDR_N_LP, 2, 0}, {HEVC_TRAIL_R, 2, 1}, {HEVC_TRAIL_R, 2, 2},
+    };
+    static const size_t count = sizeof(pictures) / sizeof(pictures[0]);
+
+    DataModel data_model;
+    HeaderMetadata header_metadata(&data_model);
+    HEVCMXFDescriptorHelper descriptor_helper;
+    std::map<int64_t, TestIndexEntry> entries;
+    ASSERT_TRUE(index_pictures(pictures, count, &entries, &header_metadata, &descriptor_helper),
+                "not every picture got an index entry");
+
+    for (int64_t i = 0; i < (int64_t)count; i++) {
+        const TestIndexEntry &entry = entries[i];
+        ASSERT_TRUE(entry.temporal_offset == 0, "intra pictures must not be reordered");
+        if (i % 3 == 0) {
+            ASSERT_TRUE(entry.key_frame_offset == 0, "IDR key frame offset != 0");
+            ASSERT_TRUE(entry.flags == 0xc4, "IDR flags != random access | sequence header | IDR (0xc4)");
+        } else {
+            ASSERT_TRUE(entry.key_frame_offset == -(i % 3), "TRAIL_R key frame offset does not point to the IDR");
+            ASSERT_TRUE(!(entry.flags & 0x80), "TRAIL_R picture flagged as a random access point");
+            ASSERT_TRUE(!(entry.flags & 0x40), "TRAIL_R picture flagged as carrying a sequence header");
+        }
+    }
+
+    HEVCSubDescriptor *sub = descriptor_helper.GetHEVCSubDescriptor();
+    ASSERT_TRUE(sub->getHEVCMaximumGOPSize() == 3, "MaximumGOPSize != 3 (GOP = IDR period)");
+    ASSERT_TRUE(sub->getHEVCClosedGOPIndicator(), "IDR-only GOPs not reported closed");
+    ASSERT_TRUE(sub->getHEVCIdenticalGOPIndicator(), "identical GOPs not reported identical");
+    ASSERT_TRUE(sub->getHEVCMaximumBPictureCount() == 0, "MaximumBPictureCount != 0");
+    // constant (0x80) | in every GOP start access unit (0x30)
+    ASSERT_TRUE(sub->haveHEVCVideoParameterSetFlag() && sub->getHEVCVideoParameterSetFlag() == 0xb0,
+                "VideoParameterSetFlag != constant, every GOP start (0xb0)");
+    ASSERT_TRUE(sub->haveHEVCSequenceParameterSetFlag() && sub->getHEVCSequenceParameterSetFlag() == 0xb0,
+                "SequenceParameterSetFlag != constant, every GOP start (0xb0)");
+    ASSERT_TRUE(sub->haveHEVCPictureParameterSetFlag() && sub->getHEVCPictureParameterSetFlag() == 0xb0,
+                "PictureParameterSetFlag != constant, every GOP start (0xb0)");
+
+    PASS();
+}
+
+static void test_hevc_index_long_gop_b_pictures()
+{
+    // Long-GOP regression guard: IDR P B B P B B in coded order (display order I B B P B B P).
+    TEST("HEVCWriterHelper indexes a long-GOP B-picture stream from its IDR");
+
+    static const TestPicture pictures[] = {
+        {HEVC_IDR_N_LP, 2, 0}, {HEVC_TRAIL_R, 1, 3}, {HEVC_TRAIL_N, 0, 1}, {HEVC_TRAIL_N, 0, 2},
+        {HEVC_TRAIL_R, 1, 6}, {HEVC_TRAIL_N, 0, 4}, {HEVC_TRAIL_N, 0, 5},
+    };
+    static const size_t count = sizeof(pictures) / sizeof(pictures[0]);
+    // display index -> coded position minus display index
+    static const int8_t expected_temporal_offsets[] = {0, 1, 1, -2, 1, 1, -2};
+
+    DataModel data_model;
+    HeaderMetadata header_metadata(&data_model);
+    HEVCMXFDescriptorHelper descriptor_helper;
+    std::map<int64_t, TestIndexEntry> entries;
+    ASSERT_TRUE(index_pictures(pictures, count, &entries, &header_metadata, &descriptor_helper),
+                "not every picture got an index entry");
+
+    ASSERT_TRUE((entries[0].flags & 0x80) && entries[0].key_frame_offset == 0, "IDR not a random access key frame");
+    for (int64_t i = 0; i < (int64_t)count; i++) {
+        ASSERT_TRUE(entries[i].temporal_offset == expected_temporal_offsets[i], "unexpected temporal offset");
+        if (i > 0) {
+            ASSERT_TRUE(!(entries[i].flags & 0x80), "P/B picture flagged as a random access point");
+            ASSERT_TRUE(entries[i].key_frame_offset == -i, "P/B key frame offset does not point to the IDR");
+        }
+    }
+
+    HEVCSubDescriptor *sub = descriptor_helper.GetHEVCSubDescriptor();
+    ASSERT_TRUE(sub->getHEVCMaximumBPictureCount() == 2, "MaximumBPictureCount != 2");
+    ASSERT_TRUE(sub->getHEVCMaximumGOPSize() == 7, "MaximumGOPSize != 7");
+    // constant (0x80) | in every GOP start access unit (0x30): the stream's one GOP starts with the IDR
+    ASSERT_TRUE(sub->getHEVCSequenceParameterSetFlag() == 0xb0,
+                "SequenceParameterSetFlag != constant, every GOP start (0xb0)");
 
     PASS();
 }
@@ -351,12 +687,17 @@ int main(int argc, const char **argv)
     test_descriptor_helper_supported();
     test_descriptor_helper_rejects_non_hevc();
     test_essence_container_ul();
+    test_descriptor_uses_byte_stream_ec();
+    test_op1a_track_supports_hevc();
     test_picture_essence_coding_uls();
     test_hevc_subdescriptor_key();
     test_descriptor_helper_creates_descriptor();
     test_hevc_parser_geometry();
     test_hevc_descriptor_geometry_from_sps();
     test_hevc_descriptor_color_range_10bit();
+    test_hevc_parser_irap_and_parameter_sets();
+    test_hevc_index_intra_trail_pictures();
+    test_hevc_index_long_gop_b_pictures();
 
     printf("\n================================================\n");
     printf("Results: %d/%d tests passed\n", pass_count, test_count);

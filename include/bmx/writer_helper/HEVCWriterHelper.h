@@ -50,6 +50,7 @@ private:
     public:
         bool is_complete;
         bool is_decoded;
+        bool is_irap;
         int64_t position;
         MPEGFrameType frame_type;
         int32_t pic_order_cnt;
@@ -57,6 +58,19 @@ private:
         int64_t key_frame_offset;
         int64_t temporal_offset;
         uint8_t flags;
+    };
+
+private:
+    class ParameterSetLocation
+    {
+    public:
+        ParameterSetLocation();
+        void Update(int64_t position, bool in_frame, bool gop_start);
+        uint8_t GetFlag(bool constant) const;
+
+        bool first_au_only;
+        bool every_au;
+        bool gop_start;
     };
 
 private:
@@ -97,6 +111,10 @@ private:
     bool mIdenticalGOP;
     bool mFirstGOP;
     std::vector<int> mGOPStructure;
+
+    ParameterSetLocation mVPSLocation;
+    ParameterSetLocation mSPSLocation;
+    ParameterSetLocation mPPSLocation;
 };
 
 

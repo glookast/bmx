@@ -390,10 +390,13 @@ void HEVCMXFDescriptorHelper::UpdateFileDescriptor(HEVCEssenceParser *essence_pa
 
 mxfUL HEVCMXFDescriptorHelper::ChooseEssenceContainerUL() const
 {
+    // The essence is an Annex B byte stream (start code prefixed NAL units), so it is labelled with
+    // the HEVC Byte Stream mapping, as bmx labels Annex B AVC with the AVC Byte Stream mapping. The
+    // NAL Unit Stream mapping is a different essence format (MPS-1098). Readers accept both labels.
     if (mFrameWrapped)
-        return MXF_EC_L(HEVCFrameWrapped);
+        return MXF_EC_L(HEVCByteStreamFrameWrapped);
     else
-        return MXF_EC_L(HEVCClipWrapped);
+        return MXF_EC_L(HEVCByteStreamClipWrapped);
 }
 
 void HEVCMXFDescriptorHelper::UpdateEssenceIndex()

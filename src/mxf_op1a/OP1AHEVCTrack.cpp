@@ -152,8 +152,9 @@ void OP1AHEVCTrack::WriteSamplesInt(const unsigned char *data, uint32_t size, ui
         mWriterHelper.GetIncompleteIndexEntry(&position, &temporal_offset, &key_frame_offset, &flags, &frame_type);
 
     mCPManager->WriteSamples(mTrackIndex, data, size, num_samples);
+    // a new partition may only start where decoding can start: an IRAP picture, not any I picture
     mIndexTable->AddIndexEntry(mTrackIndex, position, temporal_offset, key_frame_offset, flags,
-                               frame_type == I_FRAME, require_update);
+                               mEssenceParser.IsIRAPFrame(), require_update);
     mWrittenDuration++;
 }
 

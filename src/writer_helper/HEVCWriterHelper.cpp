@@ -28,6 +28,7 @@ HEVCWriterHelper::IndexedFrame::IndexedFrame()
 {
     is_complete = false;
     is_decoded = false;
+    is_irap = false;
     position = 0;
     frame_type = UNKNOWN_FRAME_TYPE;
     pic_order_cnt = 0;
@@ -35,6 +36,50 @@ HEVCWriterHelper::IndexedFrame::IndexedFrame()
     key_frame_offset = 0;
     temporal_offset = 0;
     flags = 0;
+}
+
+
+HEVCWriterHelper::ParameterSetLocation::ParameterSetLocation()
+{
+    first_au_only = false;
+    every_au = false;
+    gop_start = false;
+}
+
+void HEVCWriterHelper::ParameterSetLocation::Update(int64_t position, bool in_frame, bool is_gop_start)
+{
+    // Mirrors AVCWriterHelper's SPS/PPS location tracking
+    if (position == 0) {
+        if (in_frame) {
+            first_au_only = true;
+            every_au = true;
+            gop_start = is_gop_start;
+        }
+    } else if (in_frame) {
+        first_au_only = false;
+    } else {
+        every_au = false;
+        if (is_gop_start)
+            gop_start = false;
+    }
+}
+
+uint8_t HEVCWriterHelper::ParameterSetLocation::GetFlag(bool constant) const
+{
+    // Same coding as the AVC sub-descriptor parameter set flags: bit 7 constant, bits 6-4 location
+    // (1 = first access unit only, 2 = every access unit, 3 = every GOP start)
+    uint8_t flag = 0;
+    if (constant)
+        flag |= 1 << 7;
+
+    if (every_au)
+        flag |= 2 << 4;
+    else if (gop_start)
+        flag |= 3 << 4;
+    else if (first_au_only)
+        flag |= 1 << 4;
+
+    return flag;
 }
 
 
@@ -125,7 +170,11 @@ void HEVCWriterHelper::ProcessFrame(const unsigned char *data, uint32_t size)
     if (frame_type == UNKNOWN_FRAME_TYPE)
         frame_type = I_FRAME; // conservative fallback so an unparsed slice never breaks indexing
 
-    bool gop_start = (frame_type == I_FRAME);
+    // A GOP starts at an IRAP picture, the only picture decoding can start at. A trailing picture
+    // coded with I slices only (TRAIL_R) is not one and usually carries no parameter sets, so
+    // marking it a key frame sends a seeking reader to a picture its decoder cannot output (MPS-1098).
+    bool irap = mEssenceParser.IsIRAPFrame();
+    bool gop_start = irap;
 
     if (frame_type == B_FRAME) {
         mBPictureCount++;
@@ -169,9 +218,15 @@ void HEVCWriterHelper::ProcessFrame(const unsigned char *data, uint32_t size)
         }
     }
 
+    mVPSLocation.Update(mPosition, mEssenceParser.FrameHasVPS(), gop_start);
+    mSPSLocation.Update(mPosition, mEssenceParser.FrameHasSPS(), gop_start);
+    mPPSLocation.Update(mPosition, mEssenceParser.FrameHasPPS(), gop_start);
+
     uint8_t flags = 0x00;
     if (mEssenceParser.IsIDRFrame())
         flags |= 1 << 7; // random access bit
+    if (mEssenceParser.FrameHasSPS())
+        flags |= 1 << 6; // sequence parameter set in stream
     // prediction directions (naive; refined below via key_frame_offset for B-frames)
     if (frame_type == I_FRAME)
         flags |= 0 << 4;
@@ -199,6 +254,7 @@ void HEVCWriterHelper::ProcessFrame(const unsigned char *data, uint32_t size)
     indexed_frame.position      = mPosition;
     indexed_frame.pic_order_cnt = pic_order_cnt;
     indexed_frame.frame_type    = frame_type;
+    indexed_frame.is_irap       = irap;
     indexed_frame.flags         = flags;
     mIndexedCodedFrames[mPosition] = indexed_frame;
 
@@ -212,7 +268,7 @@ void HEVCWriterHelper::ProcessFrame(const unsigned char *data, uint32_t size)
     if (mEssenceParser.IsIDRFrame())
         mIDRKeyFramePosition = mPosition;
 
-    if (frame_type == I_FRAME)
+    if (gop_start)
         mGOPStartPosition = mPosition;
     mPosition++;
 }
@@ -254,6 +310,12 @@ void HEVCWriterHelper::CompleteProcess()
         sub->setHEVCIdenticalGOPIndicator(mIdenticalGOP);
         sub->setHEVCMaximumGOPSize(mMaxGOP);
         sub->setHEVCMaximumBPictureCount(mMaxBPictureCount);
+        if (!sub->haveHEVCVideoParameterSetFlag())
+            sub->setHEVCVideoParameterSetFlag(mVPSLocation.GetFlag(mEssenceParser.IsVPSDataConstant()));
+        if (!sub->haveHEVCSequenceParameterSetFlag())
+            sub->setHEVCSequenceParameterSetFlag(mSPSLocation.GetFlag(mEssenceParser.IsSPSDataConstant()));
+        if (!sub->haveHEVCPictureParameterSetFlag())
+            sub->setHEVCPictureParameterSetFlag(mPPSLocation.GetFlag(mEssenceParser.IsPPSDataConstant()));
     }
 }
 
@@ -327,7 +389,7 @@ void HEVCWriterHelper::PopDecodedFrame()
     mIndexedDecodedFrames[coded_pos] = mIndexedCodedFrames[coded_pos];
     mIndexedCodedFrames.erase(coded_pos);
     IndexedFrame &indexed_dec_frame = mIndexedDecodedFrames[coded_pos];
-    if (indexed_dec_frame.frame_type == I_FRAME)
+    if (indexed_dec_frame.is_irap)
     {
         indexed_dec_frame.key_frame_offset = 0;
         mKeyFramePosition = coded_pos;
@@ -385,7 +447,7 @@ void HEVCWriterHelper::PopDecodedFrame()
             mIncompleteIndexedFrames.begin()->second.is_complete)
     {
         IndexedFrame &indexed_frame = mIncompleteIndexedFrames.begin()->second;
-        if (indexed_frame.frame_type == I_FRAME && indexed_frame.temporal_offset == 0)
+        if (indexed_frame.is_irap && indexed_frame.temporal_offset == 0)
             indexed_frame.flags |= 1 << 7; // random access bit
 
         mCompleteIndexedFrames.push(indexed_frame);

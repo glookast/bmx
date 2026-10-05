@@ -125,6 +125,18 @@ public:
     MPEGFrameType GetFrameType() const       { return mFrameType; }
     bool IsIDRFrame() const                  { return mIsIDRFrame; }
     bool IsCRAFrame() const                  { return mIsCRAFrame; }
+    // An IRAP picture (BLA, IDR or CRA) is the only HEVC picture decoding can start at. A trailing
+    // picture coded with I slices only is not one.
+    bool IsIRAPFrame() const                 { return mIsIRAPFrame; }
+
+    // Parameter sets carried by the access unit last given to ParseFrameInfo
+    bool FrameHasVPS() const                 { return mFrameHasVPS; }
+    bool FrameHasSPS() const                 { return mFrameHasSPS; }
+    bool FrameHasPPS() const                 { return mFrameHasPPS; }
+    // False once a parameter set of that kind differs from the previous one parsed
+    bool IsVPSDataConstant() const           { return mVPSData.constant; }
+    bool IsSPSDataConstant() const           { return mSPSData.constant; }
+    bool IsPPSDataConstant() const           { return mPPSData.constant; }
     bool HaveFrameRate() const               { return mFrameRate.numerator > 0; }
     Rational GetFrameRate() const            { return mFrameRate; }
     Rational GetSampleAspectRatio() const    { return mSampleAspectRatio; }
@@ -238,6 +250,24 @@ private:
     uint8_t mTemporalId;
     bool mIsIDRFrame;
     bool mIsCRAFrame;
+    bool mIsIRAPFrame;
+    bool mFrameHasVPS;
+    bool mFrameHasSPS;
+    bool mFrameHasPPS;
+
+    class ParameterSetData
+    {
+    public:
+        ParameterSetData() : constant(true) {}
+        void Update(const unsigned char *data, uint32_t size);
+
+        std::vector<unsigned char> last;
+        bool constant;
+    };
+    ParameterSetData mVPSData;
+    ParameterSetData mSPSData;
+    ParameterSetData mPPSData;
+
     bool mOffsetDataReady;
     bool mInFrame;
     uint32_t mFrameSize;

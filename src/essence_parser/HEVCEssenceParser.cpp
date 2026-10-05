@@ -175,8 +175,16 @@ HEVCEssenceParser::HEVCEssenceParser()
     mFrameRate = ZERO_RATIONAL;
     mSampleAspectRatio = ZERO_RATIONAL;
     mFrameType = UNKNOWN_FRAME_TYPE;
+    mSlicePicOrderCntLsb = 0;
+    mLog2MaxPicOrderCntLsb = 0;
+    mNalUnitType = 0;
+    mTemporalId = 0;
     mIsIDRFrame = false;
     mIsCRAFrame = false;
+    mIsIRAPFrame = false;
+    mFrameHasVPS = false;
+    mFrameHasSPS = false;
+    mFrameHasPPS = false;
     mOffsetDataReady = false;
     mInFrame = false;
     mFrameSize = 0;
@@ -199,6 +207,13 @@ void HEVCEssenceParser::SetSPS(const unsigned char *data, uint32_t size)
 void HEVCEssenceParser::SetPPS(const unsigned char *data, uint32_t size)
 {
     ParsePPS(data, size);
+}
+
+void HEVCEssenceParser::ParameterSetData::Update(const unsigned char *data, uint32_t size)
+{
+    if (!last.empty() && (last.size() != size || memcmp(&last[0], data, size) != 0))
+        constant = false;
+    last.assign(data, data + size);
 }
 
 bool HEVCEssenceParser::IsVCLNALType(uint8_t nal_type)
@@ -333,6 +348,10 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
     mFrameType = UNKNOWN_FRAME_TYPE;
     mIsIDRFrame = false;
     mIsCRAFrame = false;
+    mIsIRAPFrame = false;
+    mFrameHasVPS = false;
+    mFrameHasSPS = false;
+    mFrameHasPPS = false;
     mSlicePicOrderCntLsb = 0;
     mNalUnitType = 0;
     mTemporalId = 0;
@@ -344,12 +363,18 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
         switch (nals[i].type) {
             case HEVC_VPS_NUT:
                 ParseVPS(nals[i].data + 2, nals[i].size - 2);
+                mVPSData.Update(nals[i].data, nals[i].size);
+                mFrameHasVPS = true;
                 break;
             case HEVC_SPS_NUT:
                 ParseSPS(nals[i].data + 2, nals[i].size - 2);
+                mSPSData.Update(nals[i].data, nals[i].size);
+                mFrameHasSPS = true;
                 break;
             case HEVC_PPS_NUT:
                 ParsePPS(nals[i].data + 2, nals[i].size - 2);
+                mPPSData.Update(nals[i].data, nals[i].size);
+                mFrameHasPPS = true;
                 break;
             default:
                 if (IsVCLNALType(nals[i].type)) {
@@ -360,6 +385,7 @@ void HEVCEssenceParser::ParseFrameInfo(const unsigned char *data, uint32_t data_
                     // picture order count LSB (needed for the reorder index table). Runs for IRAP
                     // pictures too — CRA/BLA carry a POC LSB; IDR does not (POC 0).
                     ParseSliceHeader(nals[i].data + 2, nals[i].size - 2, nals[i].type);
+                    mIsIRAPFrame = IsRandomAccessPoint(nals[i].type);
                     if (IsIDRNALType(nals[i].type)) {
                         mFrameType = I_FRAME;
                         mIsIDRFrame = true;
