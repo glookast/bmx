@@ -347,6 +347,10 @@ void OP1AFile::SetOutputEndOffset(int64_t offset)
 
 OP1ATrack* OP1AFile::CreateTrack(EssenceType essence_type)
 {
+    // The ST 436 VBI and ANC tracks are the elements of the GC data item; they are numbered by the order added.
+    // Timed text tracks share the data definition but are not GC data elements.
+    uint8_t st436_element_index = (mHaveANCTrack ? 1 : 0) + (mHaveVBITrack ? 1 : 0);
+
     if (essence_type == ANC_DATA) {
         if (mHaveANCTrack)
             BMX_EXCEPTION(("Only a single ST 436 ANC track is allowed"));
@@ -364,6 +368,8 @@ OP1ATrack* OP1AFile::CreateTrack(EssenceType essence_type)
     MXFDataDefEnum data_def = convert_essence_type_to_data_def(essence_type);
     uint32_t track_id = mTrackIdHelper.GetNextId(data_def);
     uint8_t track_type_number = mTrackCounts[data_def];
+    if (essence_type == ANC_DATA || essence_type == VBI_DATA)
+        track_type_number = st436_element_index;
     mTrackCounts[data_def]++;
 
     BMX_CHECK_M(mFrameWrapped || (mTracks.empty() && data_def == MXF_SOUND_DDEF && mTrackCounts[data_def] == 1),
@@ -428,8 +434,12 @@ void OP1AFile::PrepareHeaderMetadata()
             mIndexTable->SetExtensions(MXF_OPT_BOOL_FALSE, MXF_OPT_BOOL_FALSE, MXF_OPT_BOOL_FALSE);
     }
 
-    for (i = 0; i < mTracks.size(); i++)
-        mTracks[i]->PrepareWrite(mTrackCounts[mTracks[i]->GetDataDef()]);
+    // The GC data item's element count is the number of ST 436 tracks; timed text is not in the item
+    uint8_t st436_track_count = (mHaveANCTrack ? 1 : 0) + (mHaveVBITrack ? 1 : 0);
+    for (i = 0; i < mTracks.size(); i++) {
+        MXFDataDefEnum data_def = mTracks[i]->GetDataDef();
+        mTracks[i]->PrepareWrite(data_def == MXF_DATA_DDEF ? st436_track_count : mTrackCounts[data_def]);
+    }
     if (HAVE_PRIMARY_EC) {
         Timecode start_timecode = mStartTimecode;
         start_timecode.AddOffset(- mOutputStartOffset, mFrameRate);

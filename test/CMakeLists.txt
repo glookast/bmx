@@ -51,3 +51,6 @@ endif()
 
 # HEVC unit tests — no dependency on apps, runs in lib-only mode too
 add_subdirectory(hevc)
+
+# ST 436 data track unit tests (MPS-1297) - no dependency on apps, runs in lib-only mode too
+add_subdirectory(data_tracks)
