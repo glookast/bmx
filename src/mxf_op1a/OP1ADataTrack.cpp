@@ -71,8 +71,13 @@ void OP1ADataTrack::SetMaxDataSize(uint32_t size)
 
 void OP1ADataTrack::PrepareWrite(uint8_t track_count)
 {
-    BMX_ASSERT(track_count == 1);
-    // track number and essence element key are already complete
+    // SMPTE ST 379-1: byte 14 of the key is the number of elements in the GC data item and byte 16 numbers the
+    // element within it. The item's elements are the ST 436 VBI and ANC tracks, numbered 1, 2 by the order added.
+    // A single data track keeps 0x17010101 (VBI) or 0x17010201 (ANC).
+    BMX_ASSERT(track_count >= 1 && track_count <= 2 && mTrackTypeNumber < track_count);
+    uint8_t element_type = mxf_get_essence_element_type(mTrackNumber);
+    mxf_complete_essence_element_key(&mEssenceElementKey, track_count, element_type, mTrackTypeNumber + 1);
+    mxf_complete_essence_element_track_num(&mTrackNumber, track_count, element_type, mTrackTypeNumber + 1);
 
     mCPManager->RegisterDataTrackElement(mTrackIndex, mEssenceElementKey, mConstantDataSize, mMaxDataSize);
     mIndexTable->RegisterDataTrackElement(mTrackIndex, (mConstantDataSize || mMaxDataSize));

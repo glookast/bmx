@@ -288,6 +288,13 @@ void RDD9File::SetOutputEndOffset(int64_t offset)
 
 RDD9Track* RDD9File::CreateTrack(EssenceType essence_type)
 {
+    // RDD 9's data item holds a single ST 436 element: refuse a second data track here, by name, rather than at
+    // RDD9DataTrack::PrepareWrite's 'track_count == 1' assertion
+    if ((essence_type == ANC_DATA || essence_type == VBI_DATA) && (mHaveANCTrack || mHaveVBITrack)) {
+        BMX_EXCEPTION(("RDD 9 allows a single ST 436 data track (ANC or VBI); a second one (%s) cannot be added",
+                       essence_type_to_string(essence_type)));
+    }
+
     if (essence_type == ANC_DATA) {
         if (mHaveANCTrack)
             BMX_EXCEPTION(("Only a single ST 436 ANC track is allowed"));
