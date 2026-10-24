@@ -243,6 +243,15 @@ VC3MXFDescriptorHelper::VC3MXFDescriptorHelper()
     mRIComponentDepth = 0;
     mRIInterlaced = false;
     mRIRasterSet = false;
+    mHasAlpha = false;
+    mRGBADepth = 0;
+}
+
+void VC3MXFDescriptorHelper::SetAlpha(bool has_alpha)
+{
+    mHasAlpha = has_alpha;
+    if (mFileDescriptor && Is444() && mRGBADepth != 0)
+        UpdateRGBADescriptor(mRGBADepth);
 }
 
 VC3MXFDescriptorHelper::~VC3MXFDescriptorHelper()
@@ -483,7 +492,17 @@ void VC3MXFDescriptorHelper::UpdateRGBADescriptor(uint32_t component_depth)
     pixel_layout.components[1].depth = (uint8_t)component_depth;
     pixel_layout.components[2].code = 'B';
     pixel_layout.components[2].depth = (uint8_t)component_depth;
+    // MPS-1270: frames carrying alpha state it, as AMT 3's OP-Atom DNx alpha (R10 G10 B10 A10): stated R, G and B alone,
+    // Media Composer's DNx decoder refused the alpha frames ("DNxSDK ERROR -3", CORE_CONSISTENCY_CHECK_FAILURE)
+    if (mHasAlpha) {
+        pixel_layout.components[3].code = 'A';
+        pixel_layout.components[3].depth = (uint8_t)component_depth;
+    }
     rgba_descriptor->setPixelLayout(pixel_layout);
+    mRGBADepth = component_depth;
+
+    if (mHasAlpha)
+        rgba_descriptor->setAlphaTransparency(0);
 }
 
 // GKX (GKX-122): resolution-independent DNxHR descriptor. Faithful port of

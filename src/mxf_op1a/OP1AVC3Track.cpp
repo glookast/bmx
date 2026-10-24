@@ -69,3 +69,9 @@ void OP1AVC3Track::SetRIRaster(uint32_t stored_width, uint32_t stored_height, ui
     mVC3DescriptorHelper->SetRIRaster(stored_width, stored_height, component_depth, is_interlaced);
 }
 
+void OP1AVC3Track::SetAlpha(bool has_alpha)
+{
+    BMX_ASSERT(mVC3DescriptorHelper);
+    mVC3DescriptorHelper->SetAlpha(has_alpha);
+}
+
