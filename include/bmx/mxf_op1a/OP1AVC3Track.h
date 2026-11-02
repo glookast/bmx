@@ -56,6 +56,9 @@ public:
     void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
                      bool is_interlaced);
 
+    // MPS-1270: the frames carry alpha - see VC3MXFDescriptorHelper::SetAlpha
+    void SetAlpha(bool has_alpha);
+
 private:
     VC3MXFDescriptorHelper *mVC3DescriptorHelper;
 };

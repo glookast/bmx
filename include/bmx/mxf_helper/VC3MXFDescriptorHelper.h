@@ -70,6 +70,11 @@ public:
     void SetRIRaster(uint32_t stored_width, uint32_t stored_height, uint32_t component_depth,
                      bool is_interlaced);
 
+    // MPS-1270: a DNx 4:4:4 picture whose frames carry alpha (header version 4). Its RGBA descriptor's PixelLayout
+    // states an A component at the RGB depth, and AlphaTransparency false, as Avid's AMT 3 writes an OP-Atom DNx alpha
+    // file. Applies to a descriptor already made. Ignored for a 4:2:2 profile, whose descriptor is CDCI.
+    void SetAlpha(bool has_alpha);
+
     virtual mxfpp::FileDescriptor* CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata);
     virtual void UpdateFileDescriptor();
 
@@ -105,6 +110,8 @@ private:
     uint32_t mRIComponentDepth;
     bool mRIInterlaced;
     bool mRIRasterSet;
+    bool mHasAlpha;            // MPS-1270
+    uint32_t mRGBADepth;       // MPS-1270: the RGB depth UpdateRGBADescriptor last wrote, 0 before
 };
 
 
