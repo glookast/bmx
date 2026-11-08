@@ -67,26 +67,33 @@ typedef struct
 static const mxfRGBALayout ALPHA_PIXEL_LAYOUT =
     {{{'A', 8}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}};
 
+// MPS-1627: a sample rate of {0, 0} is any rate - an HD matte takes the rate of the fill it keys (23.976 and 24 were
+// refused) - and a display width of 0 is any progressive raster, the caller's (SetStoredDimensions): UHD, DCI 4K, 2K and
+// any other raster a DNxHR fill is written at. The SD rows keep their systems: their line maps and Avid's offsets are
+// the system's. The rows are matched in order, so a 1920x1080 or 1280x720 matte is still read as its HD type.
 static const SupportedEssence SUPPORTED_ESSENCE[] =
 {
     {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_SD,        {25, 1},        720,    576,    16, {23, 336},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
     {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_SD,        {30000, 1001},  720,    486,    10, {21, 283},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080I,  {25, 1},        1920,   1080,   0,  {21, 584},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080I,  {30000, 1001},  1920,   1080,   0,  {21, 584},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080I,  {30, 1},        1920,   1080,   0,  {21, 584},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {25, 1},        1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {30000, 1001},  1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {30, 1},        1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {50, 1},        1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {60000, 1001},  1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {60, 1},        1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {25, 1},        1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {30000, 1001},  1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {30, 1},        1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {50, 1},        1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {60000, 1001},  1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
-    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {60, 1},        1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
+    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080I,  {0, 0},         1920,   1080,   0,  {21, 584},  MXF_MIXED_FIELDS,  ALPHA_PIXEL_LAYOUT},
+    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_1080P,  {0, 0},         1920,   1080,   0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
+    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_HD_720P,   {0, 0},         1280,   720,    0,  {26, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
+    {MXF_EC_L(AvidUncRGBA),  AVID_ALPHA_RI,        {0, 0},         0,      0,      0,  {42, 0},    MXF_FULL_FRAME,    ALPHA_PIXEL_LAYOUT},
 };
+
+static bool matches_rate(const SupportedEssence &essence, mxfRational sample_rate)
+{
+    if (essence.sample_rate.numerator == 0)
+        return sample_rate.numerator > 0 && sample_rate.denominator > 0;
+    return sample_rate == essence.sample_rate;
+}
+
+static bool matches_display_width(const SupportedEssence &essence, uint32_t display_width)
+{
+    if (essence.display_width == 0)
+        return display_width != 0;
+    return display_width == essence.display_width;
+}
 
 
 
@@ -129,15 +136,31 @@ size_t UncRGBAMXFDescriptorHelper::GetEssenceIndex(FileDescriptor *file_descript
     else
         display_width = stored_width;
 
+    // MPS-1627: a progressive HD row is the display height it states too - a progressive matte of another height reads
+    // as AVID_ALPHA_RI. Mixed-field rows are matched by their width alone, as before
+    uint32_t stored_height = 0;
+    uint32_t display_height;
+    if (rgba_descriptor->haveStoredHeight())
+        stored_height = rgba_descriptor->getStoredHeight();
+    if (rgba_descriptor->haveDisplayHeight())
+        display_height = rgba_descriptor->getDisplayHeight();
+    else
+        display_height = stored_height;
+
     uint8_t frame_layout = 255;
     if (rgba_descriptor->haveFrameLayout())
         frame_layout = rgba_descriptor->getFrameLayout();
 
     size_t i;
     for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
+        if (SUPPORTED_ESSENCE[i].display_width != 0 && SUPPORTED_ESSENCE[i].frame_layout == MXF_FULL_FRAME &&
+            display_height != 0 && display_height != SUPPORTED_ESSENCE[i].display_height)
+        {
+            continue;
+        }
         if (CompareECULs(ec_label, alternative_ec_label, SUPPORTED_ESSENCE[i].ec_label) &&
-            sample_rate == SUPPORTED_ESSENCE[i].sample_rate &&
-            display_width == SUPPORTED_ESSENCE[i].display_width &&
+            matches_rate(SUPPORTED_ESSENCE[i], sample_rate) &&
+            matches_display_width(SUPPORTED_ESSENCE[i], display_width) &&
             frame_layout == SUPPORTED_ESSENCE[i].frame_layout &&
             mxf_equals_rgba_layout(&pixel_layout, &SUPPORTED_ESSENCE[i].pixel_layout))
         {
@@ -278,6 +301,9 @@ void UncRGBAMXFDescriptorHelper::SetSampleRate(mxfRational sample_rate)
 FileDescriptor* UncRGBAMXFDescriptorHelper::CreateFileDescriptor(mxfpp::HeaderMetadata *header_metadata)
 {
     BMX_CHECK(UpdateEssenceIndex());
+    // MPS-1627: a matte of any raster takes the caller's raster - it has no default
+    BMX_CHECK_M(SUPPORTED_ESSENCE[mEssenceIndex].display_width != 0 || (mStoredWidth != 0 && mStoredHeight != 0),
+                ("An Avid alpha matte of any raster requires its stored dimensions (SetStoredDimensions)"));
 
     mFileDescriptor = new RGBAEssenceDescriptor(header_metadata);
     UpdateFileDescriptor();
@@ -369,7 +395,7 @@ bool UncRGBAMXFDescriptorHelper::UpdateEssenceIndex()
     size_t i;
     for (i = 0; i < BMX_ARRAY_SIZE(SUPPORTED_ESSENCE); i++) {
         if (SUPPORTED_ESSENCE[i].essence_type == mEssenceType &&
-            SUPPORTED_ESSENCE[i].sample_rate == mSampleRate)
+            matches_rate(SUPPORTED_ESSENCE[i], mSampleRate))
         {
             mEssenceIndex = i;
             SetDefaultDimensions();
