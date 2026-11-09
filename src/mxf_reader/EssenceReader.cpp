@@ -759,6 +759,7 @@ uint32_t EssenceReader::GetConstantEditUnitSize()
         case AVID_ALPHA_HD_1080I:
         case AVID_ALPHA_HD_1080P:
         case AVID_ALPHA_HD_720P:
+        case AVID_ALPHA_RI:
         case VC3_1080P_1235:
         case VC3_1080P_1237:
         case VC3_1080P_1238:

@@ -151,9 +151,12 @@ static const AvidSampleRateSupport AVID_SAMPLE_RATE_SUPPORT[] =
     {AVID_10BIT_UNC_HD_1080P,  {{25, 1}, {30000, 1001}, {0, 0}}},
     {AVID_10BIT_UNC_HD_720P,   {{25, 1}, {30000, 1001}, {50, 1}, {60000, 1001}, {0, 0}}},
     {AVID_ALPHA_SD,            {{25, 1}, {30000, 1001}, {0, 0}}},
-    {AVID_ALPHA_HD_1080I,      {{25, 1}, {30000, 1001}, {0, 0}}},
-    {AVID_ALPHA_HD_1080P,      {{25, 1}, {30000, 1001}, {50, 1}, {60000, 1001}, {0, 0}}},
-    {AVID_ALPHA_HD_720P,       {{25, 1}, {30000, 1001}, {50, 1}, {60000, 1001}, {0, 0}}},
+    // MPS-1627: an HD alpha matte at any rate - the rate of the fill it keys (23.976, 24, 30, 60, ...) - and at any
+    // progressive raster (UHD, DCI 4K, 2K, ...), the raster set by the caller
+    {AVID_ALPHA_HD_1080I,      {{-1, -1}, {0, 0}}},
+    {AVID_ALPHA_HD_1080P,      {{-1, -1}, {0, 0}}},
+    {AVID_ALPHA_HD_720P,       {{-1, -1}, {0, 0}}},
+    {AVID_ALPHA_RI,            {{-1, -1}, {0, 0}}},
     {WAVE_PCM,                 {{48000, 1}, {0, 0}}},
 };
 
@@ -267,6 +270,7 @@ AvidTrack* AvidTrack::OpenNew(AvidClip *clip, File *file, uint32_t track_index, 
         case AVID_ALPHA_HD_1080I:
         case AVID_ALPHA_HD_1080P:
         case AVID_ALPHA_HD_720P:
+        case AVID_ALPHA_RI:
             return new AvidAlphaTrack(clip, track_index, essence_type, file);
         case WAVE_PCM:
             return new AvidPCMTrack(clip, track_index, essence_type, file);

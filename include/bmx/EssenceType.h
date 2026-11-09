@@ -180,6 +180,9 @@ typedef enum
     VBI_DATA,
     // Timed Text data
     TIMED_TEXT,
+    // Avid alpha matte at any progressive raster, the raster the caller's (MPS-1627). Last, so that every other
+    // value keeps the number it had
+    AVID_ALPHA_RI,
 } EssenceType;
 
 
